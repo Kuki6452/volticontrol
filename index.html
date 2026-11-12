@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VoltiControl</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Calcula el consumo eléctrico de tu hogar con integrales, estima tu factura y simula cuánto puedes ahorrar.">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="#resumen" aria-label="VoltiControl, inicio">
+      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true">
+        <circle cx="15" cy="15" r="13.5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <path d="M16.6 5.5 9.5 16.4h5.1l-1.4 8.1 7.3-11h-5.2z" fill="var(--energy)" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+      </svg>
+      <b>VoltiControl</b>
+    </a>
+    <nav class="nav" aria-label="Secciones">
+      <a href="#resumen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>Resumen</a>
+      <a href="#aparatos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v5m8-5v5M6 8h12v3a6 6 0 0 1-12 0V8Zm6 9v4"/></svg>Aparatos</a>
+      <a href="#ahorro"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M8 4v4m8 2v4m-6 2v4"/></svg>Simulador</a>
+      <a href="#medidor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17a8 8 0 1 1 16 0H4Zm8-3 3-4"/></svg>Contador</a>
+      <a href="#tarifa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 6h6m-6 4h6"/></svg>Tarifa</a>
+      <a href="#matematica"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 4H7l6 8-6 8h10"/></svg>La matemática</a>
+    </nav>
+  </div>
+</header>
+
+<div class="lienzo">
+<noscript><p class="sin-js"><b>Esta vista no ejecuta la app.</b> Abre el archivo con Chrome o Safari (en el celular: botón de compartir o los tres puntos → "Abrir con Chrome").</p></noscript>
+<main id="inicio">
+
+  <!-- RESUMEN -->
+  <section class="block" id="resumen">
+    <div class="wrap">
+      <div class="sec-head resumen-head">
+        <h1 tabindex="-1">Consumo eléctrico</h1>
+        <details id="aviso-ejemplo">
+          <summary>Hogar de ejemplo</summary>
+          <div class="ejemplo-opciones">
+            <p>Los aparatos y las lecturas iniciales son de demostración.</p>
+            <div class="ejemplo-botones">
+              <button class="btn small" id="btn-limpiar" type="button">Empezar desde cero</button>
+              <button class="btn small ghost" id="btn-ocultar-aviso" type="button">Usar el ejemplo</button>
+            </div>
+          </div>
+        </details>
+      </div>
+      <p class="lead-resumen">Descubre qué aparatos suben tu factura. VoltiControl integra la curva de potencia de tu casa para calcular los kWh, estima la factura con la tarifa por bloques y te muestra cuánto ahorras si cambias tus hábitos.</p>
+      <div class="stats" id="stats"></div>
+      <p class="top-aparato" id="top-aparato"></p>
+
+      <div class="panel curva-principal">
+        <div class="cabecera-curva">
+          <h2>Curva del día</h2>
+          <div class="legend"><span><i class="energy"></i>Potencia (kW)</span><span id="leyenda-trap"><i class="trap"></i>Trapecios</span></div>
+        </div>
+        <p class="formula-curva">La energía del día es el área bajo la curva: <span class="mono">E = ∫₀²⁴ P(t) dt</span> = <b id="e-dia"></b></p>
+        <div class="chart" id="grafico-curva"></div>
+        <details id="curva" class="curva-detalle">
+          <summary>Comparar con la regla del trapecio</summary>
+          <div class="readout">
+            <div>
+              <div class="label">Área exacta bajo la curva</div>
+              <div class="big" id="r-exacta"></div>
+            </div>
+            <div>
+              <div class="label" id="r-trap-label">Regla del trapecio</div>
+              <div class="big" id="r-trap"></div>
+              <div id="r-error" style="margin-top:4px"></div>
+            </div>
+            <div class="sep"></div>
+            <div class="n-control">
+              <label class="label" for="n-slider">Número de trapecios (n)</label>
+              <input type="range" id="n-slider" min="0" max="7" step="1">
+              <div class="ticks"><span>4</span><span>6</span><span>8</span><span>12</span><span>24</span><span>48</span><span>96</span><span>288</span></div>
+            </div>
+            <label class="check"><input type="checkbox" id="mostrar-trap"> Mostrar trapecios en la gráfica</label>
+            <p style="font-size:.9rem;color:var(--ink-2)" id="r-explica"></p>
+          </div>
+        </details>
+      </div>
+
+      <div class="acciones-resumen">
+        <a class="btn primary" href="#aparatos">Ver aparatos <span aria-hidden="true">↗</span></a>
+        <a class="btn" href="#ahorro">Simular ahorro <span aria-hidden="true">↗</span></a>
+      </div>
+
+      <details class="panel desplegable" open>
+        <summary>Factura estimada</summary>
+        <p class="nota">Importes con la tarifa de referencia (puedes cambiarla en Tarifa).</p>
+        <div class="bill">
+          <div class="panel">
+            <h3>Desglose de la factura estimada</h3>
+            <table id="tabla-factura" style="margin-top:10px"></table>
+          </div>
+          <div class="panel">
+            <h3>¿En qué bloque tarifario estás?</h3>
+            <p style="color:var(--muted);font-size:.92rem;margin-top:4px">Mientras más kWh consumes en el mes, más caro sale cada kWh adicional.</p>
+            <div class="scale-wrap"><div class="scale" id="escala"></div></div>
+            <p class="source" id="escala-nota"></p>
+          </div>
+        </div>
+      </details>
+
+      <details class="panel desplegable">
+        <summary>Consumo por aparato</summary>
+        <div class="panel" style="margin-top:20px">
+          <div class="sec-head" style="margin-bottom:12px">
+            <div>
+              <h3>¿Quién pesa más en la factura?</h3>
+              <p style="margin-top:4px">Consumo de cada aparato en el período y su parte de la factura, al precio promedio por kWh.</p>
+            </div>
+          </div>
+          <div class="bars" id="barras"></div>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- APARATOS -->
+  <section class="block" id="aparatos">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+          <h2 tabindex="-1">Aparatos</h2>
+          <p>Cada aparato aporta un rectángulo de energía: potencia × horas × cantidad × ciclo.</p>
+        </div>
+        <div class="acciones-aparatos">
+          <button class="btn primary" id="btn-agregar" type="button">+ Agregar aparato</button>
+          <button class="btn" id="btn-restaurar-aparatos" type="button" title="Vuelve a cargar los 12 aparatos del hogar de ejemplo">↺ Restaurar ejemplo</button>
+          <button class="btn quitar-todos" id="btn-quitar-todos" type="button">Quitar todos</button>
+        </div>
+      </div>
+      <div class="appliances">
+        <div class="panel">
+          <div class="list-head" aria-hidden="true">
+            <span>Aparato</span><span class="r">Potencia</span><span>Horario</span><span class="r">Horas/día</span><span class="r">kWh/día</span><span></span>
+          </div>
+          <div id="lista-aparatos"></div>
+        </div>
+        <dialog aria-labelledby="form-titulo" id="editor">
+          <form class="form" id="form-aparato" novalidate>
+            <div class="editor-head">
+              <h3 id="form-titulo">Agregar un aparato</h3>
+              <button class="btn ghost" type="button" id="cerrar-editor" aria-label="Cerrar formulario">✕</button>
+            </div>
+            <label class="field">Elegir de la lista
+              <select id="f-catalogo"></select>
+            </label>
+            <label class="field">Nombre
+              <input type="text" id="f-nombre" maxlength="60" placeholder="Ej.: Aire de la habitación" autocomplete="off">
+            </label>
+            <div class="three">
+              <label class="field">Potencia (W)
+                <input type="number" id="f-watts" min="1" max="20000" step="1" inputmode="numeric">
+              </label>
+              <label class="field">Cantidad
+                <input type="number" id="f-cantidad" min="1" max="50" step="1" value="1" inputmode="numeric">
+              </label>
+            </div>
+            <input type="hidden" id="f-horario">
+            <fieldset class="horario">
+              <legend>Horario de uso</legend>
+              <label class="check"><input type="checkbox" id="f-todo-dia"> Todo el día</label>
+              <div id="intervalos"><div id="primer-intervalo"></div></div>
+              <div id="intervalos-extra"></div>
+              <button type="button" class="btn small" id="agregar-intervalo">+ Otro horario</button>
+            </fieldset>
+            <div class="preview" id="f-preview">Completa los datos para ver cuánto consumirá.</div>
+            <div class="error" id="f-error" role="alert"></div>
+            <div class="buttons">
+              <button class="btn primary" type="submit" id="f-guardar">Agregar aparato</button>
+              <button class="btn" type="button" id="f-cancelar" hidden>Cancelar</button>
+            </div>
+          </form>
+        </dialog>
+      </div>
+    </div>
+  </section>
+
+  <!-- SIMULADOR -->
+  <section class="block" id="ahorro">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+          <h2>Simulador de ahorro</h2>
+          <p>Mueve las barras para usar cada aparato menos horas al día y mira cuánto baja la factura.</p>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn small" type="button" id="btn-aire" hidden>Probar: aire 2 horas menos</button>
+          <button class="btn small ghost" type="button" id="btn-reiniciar-sim">Reiniciar</button>
+        </div>
+      </div>
+      <div class="save-layout">
+        <div class="panel sliders" id="sliders"></div>
+        <div class="panel resultado"><p class="nota">Importes con la tarifa de referencia</p><div class="result" id="resultado-ahorro"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CONTADOR -->
+  <section class="block" id="medidor">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+          <h2>Lecturas del contador</h2>
+          <p>Anota cada día el número que marca tu contador. Con esas lecturas VoltiControl calcula tu ritmo real de consumo y proyecta cuántos kWh tendrás al cerrar el período.</p>
+          <p class="nota" id="origen-lecturas">Incluye lecturas de ejemplo.</p>
+        </div>
+      </div>
+      <div class="meter-layout">
+        <div class="panel">
+          <div class="legend">
+            <span><i class="real"></i>kWh acumulados (lecturas)</span>
+            <span><i class="proj"></i>Proyección</span>
+          </div>
+          <div class="chart" id="grafico-medidor"></div>
+          <div class="facts" id="hechos-medidor"></div>
+        </div>
+        <div class="panel">
+          <form class="form" id="form-lectura" novalidate>
+            <h3>Agregar lectura</h3>
+            <div class="two">
+              <label class="field">Fecha
+                <input type="date" id="l-fecha">
+              </label>
+              <label class="field">Lectura (kWh)
+                <input type="number" id="l-valor" min="0" step="0.1" inputmode="decimal" placeholder="15297">
+              </label>
+            </div>
+            <div class="error" id="l-error" role="alert"></div>
+            <div class="buttons"><button class="btn primary" type="submit">Guardar lectura</button></div>
+          </form>
+          <div class="readings" id="lista-lecturas" style="margin-top:14px"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TARIFA -->
+  <section class="block" id="tarifa">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+          <h2>Tarifa eléctrica</h2>
+          <p>Precio por kWh de cada bloque de la tarifa residencial. Cópialos de tu factura de Edeeste, Edesur o Edenorte si son distintos.</p>
+        </div>
+        <button class="btn small ghost" type="button" id="btn-tarifa-ref">Restaurar valores de referencia</button>
+      </div>
+      <div class="panel">
+        <div class="tariff">
+          <label class="field">0 a 200 kWh (RD$/kWh)<input type="number" id="t-0" min="0" step="0.01"></label>
+          <label class="field">201 a 300 kWh (RD$/kWh)<input type="number" id="t-1" min="0" step="0.01"></label>
+          <label class="field">301 a 700 kWh (RD$/kWh)<input type="number" id="t-2" min="0" step="0.01"></label>
+          <label class="field">Más de 700 kWh (RD$/kWh)<input type="number" id="t-3" min="0" step="0.01"></label>
+        </div>
+        <div class="tariff-extra">
+          <label class="field">Cargo fijo mensual (RD$)<input type="number" id="t-fijo" min="0" step="1"></label>
+          <label class="field">Días del período de facturación<input type="number" id="t-periodo" min="1" max="62" step="1"></label>
+        </div>
+        <details class="reglas">
+          <summary>Reglas cuando pasas de 700 kWh</summary>
+          <div class="tariff-checks">
+            <label class="check"><input type="checkbox" id="t-todo"> Si pasas de 700 kWh, todo el consumo se cobra al precio del último bloque</label>
+            <label class="check"><input type="checkbox" id="t-itbis"> Si pasas de 700 kWh, se cobra ITBIS (18 %) sobre la factura</label>
+          </div>
+        </details>
+        <p class="source">Valores de referencia: 0–200 kWh (RD$ 6.09) y más de 700 kWh (RD$ 13.09) según declaraciones del Ministerio de Energía y Minas publicadas en octubre de 2026. Los bloques intermedios, el cargo fijo y la regla del ITBIS vienen de guías públicas y pueden variar según la distribuidora. Compáralos con tu factura.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- MATEMÁTICA -->
+  <section class="block" id="matematica">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+          <h2>La matemática detrás</h2>
+          <p>VoltiControl aplica el Cálculo Integral a un problema de cada día: entender la factura de la luz.</p>
+        </div>
+      </div>
+      <div class="math">
+        <details class="panel" open>
+          <summary>La energía es un área</summary>
+          <div class="formula">E = ∫<sub>0</sub><sup>24</sup> P(t) dt</div>
+          <p>La potencia P(t) dice cuántos vatios usa la casa en cada instante. Integrar la potencia en vatios a lo largo de las horas da la energía en Wh. Al dividir entre 1,000 se obtienen los kWh que mide el contador.</p>
+          <p>Con potencia constante, el área es un rectángulo. Un aire de 1,200 W que trabaja el 70 % del tiempo durante 7 horas consume 1,200 × 0.7 × 7 = 5,880 Wh, es decir, <b>5.88 kWh</b>.</p>
+        </details>
+        <details class="panel" open>
+          <summary>Regla del trapecio</summary>
+          <div class="formula">T<sub>n</sub> = <span style="font-size:.9em">h⁄2</span> [P(t<sub>0</sub>) + 2P(t<sub>1</sub>) + … + 2P(t<sub>n−1</sub>) + P(t<sub>n</sub>)]</div>
+          <p>Divide el día en n partes de ancho h = 24/n y suma el área de los trapecios. Así se calcula la energía cuando solo se conocen mediciones cada cierto tiempo, como las de un sensor.</p>
+          <p>Una malla más fina suele acercar la aproximación al área exacta. El error puede variar según dónde caen las muestras. Los aparatos que se usan pocos minutos, como el microondas, son los que más se escapan con n pequeño.</p>
+        </details>
+        <details class="panel" open>
+          <summary>Del día al mes</summary>
+          <div class="formula">E<sub>período</sub> = E<sub>día</sub> × días</div>
+          <p>Las lecturas del contador son la energía acumulada. Su pendiente, el ritmo en kWh por día, es la derivada de esa acumulación, y con ella se proyecta el cierre del período mediante una recta de mínimos cuadrados.</p>
+          <p>La factura es una función por partes: cada bloque de kWh tiene su propio precio, y al pasar de 700 kWh cambia la regla de cobro.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <b>VoltiControl</b> · Proyecto innovador de Cálculo Integral, sección 4<br>
+      Instituto Tecnológico de Las Américas (ITLA) · Prof. Lcdo. David Mercedes
+    </div>
+    <div>
+      Leonardo Pérez · Randy Benítez · Eddian Hernández · Diego Martinez<br>
+      Tus datos se guardan solo en este navegador.
+    </div>
+  </div>
+</footer>
+</div>
+
+<div class="sr-only" aria-live="polite" id="anuncio"></div>
+
+<script src="js/calculos.js"></script>
+<script src="js/datos.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,2576 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VoltiControl</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Calcula el consumo eléctrico de tu hogar con integrales, estima tu factura y simula cuánto puedes ahorrar.">
+<style>
+/*
+ * VoltiControl — estilos.
+ * Concepto: tablero de un contador eléctrico. Columna única de secciones,
+ * lecturas en dígitos de medidor, ámbar para la energía (área bajo la curva)
+ * y azul eléctrico para la potencia y las acciones.
+ */
+:root {
+  --bg: #eef1ee;
+  --surface: #ffffff;
+  --surface-2: #f6f8f6;
+  --ink: #15201b;
+  --ink-2: #44524b;
+  --muted: #6b7a72;
+  --line: #d5dcd7;
+  --accent: #2243c4;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(34, 67, 196, 0.10);
+  --energy: #e9a210;
+  --energy-soft: rgba(233, 162, 16, 0.32);
+  --meter-bg: #15201b;
+  --meter-fg: #f3f6f4;
+  --good: #1d7f48;
+  --warn: #a96500;
+  --crit: #b8322a;
+  --good-soft: rgba(29, 127, 72, 0.12);
+  --warn-soft: rgba(169, 101, 0, 0.13);
+  --crit-soft: rgba(184, 50, 42, 0.12);
+
+  --font-display: 'Archivo', 'Arial Narrow', system-ui, sans-serif;
+  --font-body: 'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  --r: 10px;
+  --r-sm: 6px;
+  --max: 1080px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1412;
+    --surface: #161e1b;
+    --surface-2: #1c2622;
+    --ink: #e7ede9;
+    --ink-2: #bcc8c1;
+    --muted: #8d9c94;
+    --line: #2b3732;
+    --accent: #8ea2ff;
+    --accent-ink: #0e1412;
+    --accent-soft: rgba(142, 162, 255, 0.14);
+    --energy: #f3b53a;
+    --energy-soft: rgba(243, 181, 58, 0.28);
+    --meter-bg: #050807;
+    --meter-fg: #f3f6f4;
+    --good: #5cc98a;
+    --warn: #e9a440;
+    --crit: #f07a70;
+    --good-soft: rgba(92, 201, 138, 0.14);
+    --warn-soft: rgba(233, 164, 64, 0.15);
+    --crit-soft: rgba(240, 122, 112, 0.15);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1412;
+  --surface: #161e1b;
+  --surface-2: #1c2622;
+  --ink: #e7ede9;
+  --ink-2: #bcc8c1;
+  --muted: #8d9c94;
+  --line: #2b3732;
+  --accent: #8ea2ff;
+  --accent-ink: #0e1412;
+  --accent-soft: rgba(142, 162, 255, 0.14);
+  --energy: #f3b53a;
+  --energy-soft: rgba(243, 181, 58, 0.28);
+  --meter-bg: #050807;
+  --meter-fg: #f3f6f4;
+  --good: #5cc98a;
+  --warn: #e9a440;
+  --crit: #f07a70;
+  --good-soft: rgba(92, 201, 138, 0.14);
+  --warn-soft: rgba(233, 164, 64, 0.15);
+  --crit-soft: rgba(240, 122, 112, 0.15);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto;
+  height: env(safe-area-inset-top, 0px);
+  z-index: 10;
+  background: var(--surface);
+}
+
+.wrap {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+  font-stretch: 85%;
+  line-height: 1.1;
+  text-wrap: balance;
+  margin: 0;
+}
+h2 { font-size: clamp(1.45rem, 3vw, 1.85rem); font-weight: 750; letter-spacing: -0.01em; }
+h3 { font-size: 1.05rem; font-weight: 700; }
+p { margin: 0; }
+
+.num, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+a { color: var(--accent); }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+/* ---------- Barra superior ---------- */
+.topbar {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 9;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.topbar .wrap {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding-block: 10px;
+  flex-wrap: wrap;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--ink);
+}
+.brand svg { flex: none; }
+.brand b {
+  font-family: var(--font-display);
+  font-stretch: 80%;
+  font-weight: 800;
+  font-size: 1.35rem;
+  letter-spacing: -0.01em;
+}
+.nav {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  min-width: 0;
+  flex: 1;
+  justify-content: flex-end;
+}
+.nav a {
+  color: var(--ink-2);
+  text-decoration: none;
+  font-size: 0.92rem;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.nav a:hover { background: var(--surface-2); color: var(--ink); }
+
+@media (max-width: 720px) {
+  .nav { flex-basis: 100%; justify-content: flex-start; margin-inline: -6px; }
+  .topbar .wrap { gap: 6px; }
+}
+
+/* ---------- Encabezado ---------- */
+.hero { padding-block: 36px 8px; }
+.hero .wrap { display: grid; gap: 24px; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); align-items: end; }
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.hero h1 {
+  font-size: clamp(2.1rem, 5.4vw, 3.6rem);
+  font-weight: 800;
+  font-stretch: 78%;
+  letter-spacing: -0.02em;
+  margin-top: 8px;
+}
+.hero h1 em { font-style: normal; color: var(--accent); }
+.hero p.lead { color: var(--ink-2); font-size: 1.08rem; margin-top: 12px; max-width: 58ch; }
+
+.meter {
+  background: var(--meter-bg);
+  color: var(--meter-fg);
+  border-radius: var(--r);
+  padding: 16px 18px 14px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.meter-top { display: flex; justify-content: space-between; gap: 12px; font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; }
+.digits { display: flex; gap: 4px; flex-wrap: wrap; }
+.digits span {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: clamp(1.6rem, 4vw, 2.2rem);
+  line-height: 1;
+  padding: 8px 6px;
+  min-width: 1.15em;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 50%, rgba(255,255,255,0.08));
+  border-radius: 4px;
+}
+.digits span.dec { background: #c8481f; color: #fff; }
+.meter-bottom { font-size: 0.85rem; opacity: 0.8; }
+
+/* ---------- Secciones ---------- */
+section.block { padding-block: 36px; scroll-margin-top: 70px; }
+.sec-head { display: flex; justify-content: space-between; align-items: end; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+.sec-head p { color: var(--muted); max-width: 62ch; margin-top: 6px; }
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 20px;
+  min-width: 0;
+}
+
+.notice {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  background: var(--energy-soft);
+  border-radius: var(--r);
+  padding: 10px 14px;
+  font-size: 0.95rem;
+  margin-top: 20px;
+}
+.notice .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- Resumen ---------- */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.stat { background: var(--surface); padding: 16px 18px; display: grid; gap: 4px; align-content: start; min-width: 0; }
+.stat .label { font-size: 0.82rem; color: var(--muted); font-weight: 600; letter-spacing: 0.02em; }
+.stat .value { font-family: var(--font-mono); font-size: clamp(1.4rem, 3vw, 1.9rem); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.15; overflow-wrap: anywhere; }
+.stat .value.word { font-family: var(--font-display); font-stretch: 85%; font-size: 1.3rem; overflow-wrap: break-word; hyphens: auto; }
+@media (max-width: 520px) { .stat .value.word { font-size: 1.1rem; } }
+.stat .value small { font-size: 0.55em; font-weight: 400; color: var(--muted); margin-left: 4px; }
+.stat .sub { font-size: 0.86rem; color: var(--ink-2); }
+.stat .pill { white-space: normal; }
+@media (max-width: 860px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pill.good { color: var(--good); background: var(--good-soft); }
+.pill.warn { color: var(--warn); background: var(--warn-soft); }
+.pill.crit { color: var(--crit); background: var(--crit-soft); }
+
+.bill { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; margin-top: 20px; }
+@media (max-width: 860px) { .bill { grid-template-columns: minmax(0, 1fr); } }
+.bill table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+.bill td, .bill th { padding: 7px 0; border-bottom: 1px solid var(--line); text-align: left; }
+.bill th { font-size: 0.78rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.bill td + td, .bill th + th { padding-left: 10px; }
+@media (max-width: 520px) { .bill .p { display: none; } .bill table { font-size: 0.88rem; } }
+.bill td.r, .bill th.r { white-space: nowrap; text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.bill tr.total td { border-bottom: 0; font-weight: 700; font-size: 1.05rem; padding-top: 10px; }
+
+/* escala de bloques */
+.scale { display: grid; gap: 10px; }
+.scale-bar { position: relative; height: 34px; display: flex; gap: 2px; }
+.scale-bar .seg { height: 100%; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-family: var(--font-mono); color: var(--ink-2); background: var(--surface-2); border: 1px solid var(--line); min-width: 0; overflow: hidden; }
+.scale-bar .seg.on { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); font-weight: 600; }
+.scale-mark { position: absolute; top: -6px; bottom: -6px; width: 2px; background: var(--ink); border-radius: 2px; }
+.scale-mark span { position: absolute; top: -22px; transform: translateX(-50%); font-family: var(--font-mono); font-size: 0.75rem; white-space: nowrap; background: var(--ink); color: var(--surface); padding: 1px 6px; border-radius: 4px; }
+.scale-legend { position: relative; height: 1.2em; font-family: var(--font-mono); font-size: 0.75rem; color: var(--muted); }
+.scale-legend span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+.scale-legend span:first-child { transform: none; }
+.scale-legend span:last-child { transform: translateX(-100%); }
+.scale-wrap { padding-top: 34px; }
+
+/* ---------- Botones y formularios ---------- */
+.btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.92rem;
+  padding: 8px 14px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  line-height: 1.2;
+}
+.btn:hover { background: var(--surface-2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--accent); padding-inline: 8px; }
+.btn.ghost:hover { background: var(--accent-soft); }
+.btn.danger { color: var(--crit); }
+.btn.small { padding: 5px 9px; font-size: 0.85rem; }
+
+label.field { display: grid; gap: 4px; font-size: 0.85rem; font-weight: 600; color: var(--ink-2); min-width: 0; }
+label.field .hint { font-weight: 400; color: var(--muted); font-size: 0.8rem; }
+input[type="text"], input[type="number"], input[type="date"], select {
+  font: inherit;
+  font-size: 0.98rem;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  width: 100%;
+  min-width: 0;
+}
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
+input.invalid { border-color: var(--crit); outline-color: var(--crit); }
+.error { color: var(--crit); font-size: 0.88rem; font-weight: 600; min-height: 1.3em; }
+
+input[type="range"] { width: 100%; accent-color: var(--accent); }
+input[type="checkbox"] { accent-color: var(--accent); width: 18px; height: 18px; }
+
+/* ---------- Aparatos ---------- */
+.appliances { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 920px) { .appliances { grid-template-columns: minmax(0, 1fr); } }
+
+.list-head, .row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) 5.2em minmax(0, 1.6fr) 4.6em 4.6em auto;
+  gap: 12px;
+  align-items: center;
+}
+.list-head { font-size: 0.75rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; padding: 0 0 8px; border-bottom: 1px solid var(--line); }
+.list-head .r, .row .r { text-align: right; }
+.row { padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 0.95rem; }
+.row:last-child { border-bottom: 0; }
+.row .name { font-weight: 600; overflow-wrap: anywhere; }
+.row .name small { display: block; font-weight: 400; color: var(--muted); font-size: 0.82rem; }
+.row .mono { font-size: 0.88rem; white-space: nowrap; }
+.row .sched { color: var(--ink-2); font-size: 0.86rem; font-family: var(--font-mono); overflow-wrap: anywhere; }
+.row .acts { display: flex; gap: 2px; justify-content: flex-end; }
+.row.editing { background: var(--accent-soft); margin-inline: -10px; padding-inline: 10px; border-radius: var(--r-sm); }
+.row .k { display: none; }
+
+@media (max-width: 640px) {
+  .list-head { display: none; }
+  .row { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; }
+  .row .name, .row .sched { grid-column: 1 / -1; }
+  .row .mono { white-space: normal; }
+  .row > :not(.name):not(.acts) { text-align: left; }
+  .row .k { display: inline; color: var(--muted); font-family: var(--font-body); font-size: 0.8rem; margin-right: 6px; }
+  .row .acts { grid-column: 1 / -1; justify-content: flex-start; }
+}
+
+.form { display: grid; gap: 12px; }
+.form .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.form .three { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+@media (max-width: 420px) { .form .three { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.form .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.form .preview { font-size: 0.9rem; color: var(--ink-2); background: var(--surface-2); border-radius: var(--r-sm); padding: 8px 10px; }
+
+.empty { text-align: center; padding: 28px 10px; color: var(--muted); }
+
+/* ---------- Gráficos ---------- */
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart .grid line { stroke: var(--line); stroke-width: 1; }
+.chart .axis text { fill: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.chart .axis-title { fill: var(--muted); font-family: var(--font-body); font-size: 12px; }
+.chart .area { fill: var(--energy-soft); }
+.chart .curve { fill: none; stroke: var(--energy); stroke-width: 2; stroke-linejoin: round; }
+.chart .trap { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; }
+.chart .trap-dot { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+.chart .cross { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 3 3; }
+.chart .threshold { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
+.chart .threshold-label { fill: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.chart .real { fill: none; stroke: var(--accent); stroke-width: 2; }
+.chart .proj { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 5; }
+.chart .dot { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+.chart .dot-end { fill: var(--surface); stroke: var(--accent); stroke-width: 2; }
+.chart .end-label { fill: var(--ink); font-family: var(--font-mono); font-size: 12px; font-weight: 600; }
+
+.tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--ink);
+  color: var(--surface);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  min-width: 150px;
+  max-width: 240px;
+  transform: translate(-50%, calc(-100% - 12px));
+  z-index: 2;
+}
+.tooltip b { font-family: var(--font-mono); }
+.tooltip ul { margin: 4px 0 0; padding: 0; list-style: none; opacity: 0.85; }
+
+.curve-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px; align-items: start; }
+@media (max-width: 920px) { .curve-layout { grid-template-columns: minmax(0, 1fr); } }
+
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.85rem; color: var(--ink-2); margin-bottom: 8px; }
+.legend i { display: inline-block; width: 14px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.legend i.energy { background: var(--energy-soft); border-top: 2px solid var(--energy); }
+.legend i.trap { background: var(--accent-soft); border: 1.5px solid var(--accent); }
+.legend i.real { background: var(--accent); height: 2px; vertical-align: 3px; }
+.legend i.proj { border-top: 2px dashed var(--accent); height: 0; vertical-align: 3px; }
+
+.readout { display: grid; gap: 14px; }
+.readout .big { font-family: var(--font-mono); font-size: 1.7rem; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.readout .big small { font-size: 0.55em; color: var(--muted); font-weight: 400; }
+.readout .label { font-size: 0.8rem; color: var(--muted); font-weight: 600; }
+.readout .sep { border-top: 1px solid var(--line); }
+.n-control { display: grid; gap: 6px; }
+.n-control .ticks { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); }
+.check { display: flex; gap: 8px; align-items: center; font-size: 0.92rem; cursor: pointer; }
+
+/* barras de distribución */
+.bars { display: grid; gap: 10px; }
+.bar-row { display: grid; grid-template-columns: minmax(0, 190px) minmax(0, 1fr) 11.5em; gap: 12px; align-items: center; font-size: 0.92rem; }
+.bar-row .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-track { height: 14px; position: relative; }
+.bar-fill { height: 100%; background: var(--energy); border-radius: 0 4px 4px 0; min-width: 2px; }
+.bar-row.top .bar-fill { background: var(--accent); }
+.bar-row .v { white-space: nowrap; text-align: right; font-family: var(--font-mono); font-size: 0.85rem; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+@media (max-width: 640px) {
+  .bar-row { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; }
+  .bar-row .bar-track { grid-column: 1 / -1; grid-row: 2; }
+}
+
+/* ---------- Medidor ---------- */
+.meter-layout { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 920px) { .meter-layout { grid-template-columns: minmax(0, 1fr); } }
+.readings { display: grid; gap: 0; font-size: 0.92rem; max-height: 300px; overflow-y: auto; }
+.reading { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 12px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.reading .d { color: var(--good); font-family: var(--font-mono); font-size: 0.85rem; }
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+@media (max-width: 560px) { .facts { grid-template-columns: minmax(0, 1fr); } }
+.fact { background: var(--surface-2); border-radius: var(--r-sm); padding: 10px 12px; display: grid; gap: 2px; }
+.fact .label { font-size: 0.8rem; color: var(--muted); font-weight: 600; }
+.fact .val { font-family: var(--font-mono); font-weight: 600; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+.fact .sub { font-size: 0.82rem; color: var(--ink-2); }
+
+/* ---------- Ahorro ---------- */
+.save-layout { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 920px) { .save-layout { grid-template-columns: minmax(0, 1fr); } }
+.sliders { display: grid; gap: 16px; }
+.slider-row { display: grid; gap: 4px; }
+.slider-row .top { display: flex; justify-content: space-between; gap: 12px; font-size: 0.92rem; }
+.slider-row .top b { font-weight: 600; overflow-wrap: anywhere; }
+.slider-row .top span { font-family: var(--font-mono); font-size: 0.85rem; color: var(--ink-2); white-space: nowrap; }
+.result { display: grid; gap: 14px; }
+.result .compare { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.result .compare div { display: grid; gap: 2px; }
+.result .compare .k { font-size: 0.8rem; color: var(--muted); font-weight: 600; }
+.result .compare .v { font-family: var(--font-mono); font-size: 1.15rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.savings { background: var(--good-soft); border-radius: var(--r-sm); padding: 14px; display: grid; gap: 4px; }
+.savings .v { font-family: var(--font-mono); font-size: 1.8rem; font-weight: 600; color: var(--good); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.savings .sub { font-size: 0.9rem; color: var(--ink-2); }
+
+/* ---------- Matemática ---------- */
+.math { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+@media (max-width: 920px) { .math { grid-template-columns: minmax(0, 1fr); } }
+.math .panel { display: grid; gap: 10px; align-content: start; }
+.math p { color: var(--ink-2); }
+.formula {
+  font-family: 'Cambria Math', 'STIX Two Math', 'Times New Roman', serif;
+  font-size: 1.25rem;
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.formula sub, .formula sup { font-size: 0.65em; }
+
+/* ---------- Tarifa ---------- */
+.tariff { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 720px) { .tariff { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tariff-extra { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+@media (max-width: 560px) { .tariff-extra { grid-template-columns: minmax(0, 1fr); } }
+.tariff-checks { display: grid; gap: 8px; margin-top: 14px; }
+.source { font-size: 0.85rem; color: var(--muted); margin-top: 14px; max-width: 80ch; }
+
+/* ---------- Pie ---------- */
+footer { border-top: 1px solid var(--line); margin-top: 24px; }
+footer .wrap { padding-block: 24px 40px; display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; font-size: 0.9rem; color: var(--muted); }
+footer b { color: var(--ink-2); }
+
+.hero .wrap > *, .sec-head > * { min-width: 0; }
+@media (max-width: 720px) { .hero .wrap { grid-template-columns: minmax(0, 1fr); } }
+
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+  .bar-fill { transition: width 0.3s ease; }
+}
+
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+:root {
+  --bg: #eff3f2;
+  --surface: #fff;
+  --surface-2: #f3f7f4;
+  --ink: #102924;
+  --ink-2: #334d46;
+  --muted: #52655f;
+  --line: #d6e1db;
+  --accent: #175d43;
+  --accent-ink: #112719;
+  --accent-soft: #e5f2e9;
+  --energy: #197045;
+  --energy-soft: #d9efd5;
+  --good: #17633c;
+  --warn: #895312;
+  --crit: #a82d2c;
+  --good-soft: #e4f3e8;
+  --warn-soft: #fbf1d8;
+  --crit-soft: #fbe8e8;
+  --rail: #102e29;
+  --lima: #cbf76b;
+  --rail-width: 220px;
+  --font-display: 'Segoe UI', system-ui, sans-serif;
+  --font-body: 'Segoe UI', system-ui, sans-serif;
+  --r: 14px;
+  --r-sm: 8px;
+}
+[hidden] { display: none !important; }
+body::before { display: none; }
+body { line-height: 1.5; }
+.lienzo { margin-left: var(--rail-width); }
+.wrap { max-width: 1320px; width: 100%; padding-inline: clamp(20px, 4vw, 58px); }
+.topbar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: var(--rail-width);
+  background: var(--rail);
+  border: 0;
+  color: #f8fff9;
+  overflow: auto;
+  backdrop-filter: none;
+}
+.topbar .wrap { display: block; padding: 24px 14px; }
+.brand { color: #f8fff9; padding: 4px 8px; gap: 9px; width: fit-content; }
+.brand b { font-size: 1.27rem; letter-spacing: -.045em; }
+.brand svg { color: var(--lima); }
+.brand svg circle { opacity: .44; }
+.brand svg path { fill: var(--lima); }
+.nav { margin-top: 36px; display: grid; gap: 4px; }
+.nav a {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+  color: #dcebe3;
+  border-radius: 8px;
+  font-size: .9rem;
+  font-weight: 600;
+  padding: 11px 12px;
+}
+.nav a svg { width: 19px; height: 19px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
+.nav a:hover, .nav a[aria-current] { background: #24493c; color: #fafff5; }
+.nav a[aria-current] svg { color: var(--lima); }
+.nav a:nth-child(5) { margin-top: 15px; position: relative; }
+.nav a:nth-child(5)::before { content: ''; position: absolute; inset: -9px 12px auto; border-top: 1px solid #537168; }
+.nav a:focus-visible, .brand:focus-visible { outline-color: var(--lima); }
+main { min-height: calc(100svh - 92px); }
+.block { padding-block: 36px 24px; border: 0; }
+.sec-head { align-items: center; margin-bottom: 20px; }
+h1, h2, h3 { font-stretch: normal; }
+h1, .sec-head h2 { font-size: clamp(2rem, 4.2vw, 3.2rem); line-height: 1.07; letter-spacing: -.055em; margin: 0; }
+h3 { font-size: 1.12rem; }
+h1:focus, h2:focus { outline: none; }
+.resumen-head { gap: 12px 22px; justify-content: flex-start; }
+#aviso-ejemplo { position: relative; }
+summary { cursor: pointer; font-weight: 650; width: fit-content; max-width: 100%; }
+#aviso-ejemplo summary { background: var(--accent-soft); color: var(--accent); border-radius: 7px; padding: 6px 10px; font-size: .82rem; }
+.ejemplo-opciones { position: absolute; z-index: 3; width: 252px; padding: 14px; top: calc(100% + 8px); left: 0; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); box-shadow: 0 10px 22px #10292424; font-size: .87rem; }
+.ejemplo-opciones p { margin: 0 0 10px; }
+.stats { display: flex; flex-wrap: wrap; gap: 0; margin: 23px 0 28px; border: 0; background: transparent; }
+.stat { padding: 0 28px 0 0; background: transparent; gap: 5px; }
+.stat + .stat { border-left: 1px solid var(--line); padding: 0 0 0 28px; }
+.stat .value { grid-row: 1; font-family: var(--font-display); font-size: clamp(2.3rem, 5.2vw, 4.4rem); line-height: 1; font-weight: 750; letter-spacing: -.065em; }
+.stat + .stat .value { font-size: clamp(2rem, 4vw, 3.65rem); padding-top: .11em; }
+.stat .value small { color: var(--ink-2); font-size: .42em; font-weight: 600; letter-spacing: -.03em; margin-left: 7px; }
+.stat .label { font-size: .91rem; letter-spacing: 0; font-weight: 500; }
+.panel { box-shadow: none; min-width: 0; padding: clamp(15px, 2.3vw, 26px); }
+.curva-principal { padding-bottom: 14px; }
+.cabecera-curva { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 12px; margin-bottom: 6px; }
+.cabecera-curva h2 { font-size: clamp(1.3rem, 2.4vw, 1.85rem); letter-spacing: -.045em; }
+.cabecera-curva .legend { margin: 0; }
+.chart .curve { stroke-width: 2.3; }
+.chart .trap { stroke: var(--warn); fill: #f4cc764d; }
+.chart .trap-dot { fill: var(--warn); }
+.legend i.trap { border-color: var(--warn); background: #f4cc764d; }
+.curva-detalle { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 9px; }
+.curva-detalle summary { color: var(--accent); font-size: .86rem; }
+.curva-detalle .readout { margin-top: 16px; }
+.readout .big { font-family: var(--font-display); }
+.acciones-resumen { display: flex; gap: 10px; flex-wrap: wrap; margin: 16px 0; }
+.btn { border-radius: 8px; text-decoration: none; min-height: 42px; }
+.btn.small { min-height: 34px; }
+.btn.primary { background: var(--lima); color: #112719; border-color: #bce75d; }
+.btn.primary:hover { background: #bce75d; filter: none; }
+.acciones-resumen .btn span { margin-left: 8px; }
+.desplegable { padding-block: 12px; margin-top: 8px; }
+.desplegable > .panel { border: 0; padding: 0; }
+.nota { color: var(--muted); font-size: .85rem; margin: 8px 0; }
+.bill { margin-top: 12px; }
+.bill .panel { background: var(--surface-2); }
+.appliances { display: block; }
+.list-head, .row { grid-template-columns: minmax(140px, 1.45fr) minmax(56px, .55fr) minmax(88px, 1fr) minmax(54px, .55fr) minmax(54px, .55fr) auto; }
+#editor {
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  width: min(540px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  padding: clamp(16px, 3vw, 26px);
+  overflow: auto;
+  box-shadow: 0 24px 70px #0c241d40;
+}
+#editor::backdrop { background: #0c241d85; }
+.editor-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.editor-head h3 { overflow-wrap: anywhere; }
+.form .three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.horario { padding: 8px 12px 12px; margin: 0; min-width: 0; border: 1px solid var(--line); border-radius: 8px; }
+.horario legend { font-weight: 650; }
+.intervalo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 10px; margin-top: 8px; }
+.intervalo .medianoche { grid-column: 1/-1; font-size: .82rem; color: var(--muted); }
+.intervalo .btn { grid-column: 1/-1; justify-self: start; }
+.field input, .field select { width: 100%; min-width: 0; }
+.opciones { display: grid; gap: 10px; margin-top: 8px; }
+.opciones > button { justify-self: start; }
+.error:empty { display: none; }
+.resultado { position: sticky; top: 20px; }
+.resultado .nota { margin-top: 0; }
+.math { grid-template-columns: 1fr; gap: 10px; }
+.math details.panel { display: block; }
+.math details[open] > :not(summary) { margin-top: 10px; }
+.reglas { margin-top: 18px; }
+footer { padding-block: 16px; color: var(--muted); font-size: .76rem; }
+footer .wrap { gap: 10px 20px; }
+@media (min-width: 781px) and (max-width: 1100px) {
+  :root { --rail-width: 174px; }
+  .topbar .wrap { padding-inline: 10px; }
+}
+@media (max-width: 980px) and (min-width: 781px) {
+  .row, .list-head { grid-template-columns: minmax(115px, 1.3fr) 1fr 64px auto; }
+  .row > :nth-child(2), .row > :nth-child(4), .list-head > :nth-child(2), .list-head > :nth-child(4) { display: none; }
+}
+@media (max-width: 780px) {
+  .topbar { position: relative; inset: auto; width: auto; overflow: visible; }
+  .topbar .wrap { padding: 12px 16px; gap: 0; }
+  .brand { padding: 0; }
+  .brand svg { width: 24px; height: 24px; }
+  .nav { margin-top: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; overflow: visible; padding: 0; }
+  .nav a { font-size: .77rem; gap: 6px; min-height: 36px; padding: 6px; white-space: normal; }
+  .nav a svg { width: 15px; height: 15px; }
+  .nav a:nth-child(5) { margin: 0; }
+  .nav a:nth-child(5)::before { content: none; }
+  .lienzo { margin-left: 0; }
+  .block { padding-top: 22px; }
+  main { min-height: calc(100svh - 200px); }
+  .resultado { position: static; grid-row: 1; }
+}
+@media (max-width: 640px) {
+  .list-head { display: none; }
+  .row { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; }
+  .row > :first-child { grid-column: 1/-1; }
+  .row > :nth-child(3) { grid-column: 1/-1; }
+  .row > :nth-child(6) { grid-column: 1/-1; }
+}
+@media (max-width: 460px) {
+  .wrap { padding-inline: 14px; }
+  .stats { margin-block: 18px; }
+  .stat { padding-right: 12px; }
+  .stat + .stat { padding-left: 12px; }
+  .stat .value { font-size: clamp(1.8rem, 8.1vw, 2.4rem); }
+  .stat + .stat .value { font-size: clamp(1.7rem, 7vw, 2.1rem); }
+  .stat .label { font-size: .79rem; }
+  .curva-principal { padding-inline: 10px; }
+  .reading { gap: 6px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .chart .area, .chart .curve { animation: aparecer-curva 280ms ease-out both; }
+  @keyframes aparecer-curva { from { opacity: .25; } to { opacity: 1; } }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0s !important; transition-duration: 0s !important; scroll-behavior: auto !important; }
+}
+.nav { justify-content: stretch; }
+.chart .axis text { font-size: 12px; }
+@media (max-width: 780px) {
+  .nav { margin-inline: 0; }
+}
+
+/* ---------- modo oscuro de la paleta verde ---------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0c1614;
+    --surface: #13201d;
+    --surface-2: #192a26;
+    --ink: #e5f1eb;
+    --ink-2: #bad0c6;
+    --muted: #91a89f;
+    --line: #2a3e38;
+    --accent: #93dcb3;
+    --accent-ink: #0c1614;
+    --accent-soft: #1d3a2e;
+    --energy: #6fd39a;
+    --energy-soft: #1f3d2c;
+    --good: #7fd6a0;
+    --warn: #e6b25a;
+    --crit: #f08a86;
+    --good-soft: #1c3427;
+    --warn-soft: #3a2d14;
+    --crit-soft: #3d1f1f;
+    --rail: #08110f;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0c1614;
+  --surface: #13201d;
+  --surface-2: #192a26;
+  --ink: #e5f1eb;
+  --ink-2: #bad0c6;
+  --muted: #91a89f;
+  --line: #2a3e38;
+  --accent: #93dcb3;
+  --accent-ink: #0c1614;
+  --accent-soft: #1d3a2e;
+  --energy: #6fd39a;
+  --energy-soft: #1f3d2c;
+  --good: #7fd6a0;
+  --warn: #e6b25a;
+  --crit: #f08a86;
+  --good-soft: #1c3427;
+  --warn-soft: #3a2d14;
+  --crit-soft: #3d1f1f;
+  --rail: #08110f;
+}
+
+/* ---------- portada: datos clave visibles ---------- */
+.lead-resumen { color: var(--ink-2); max-width: 62ch; margin: -6px 0 0; }
+.stat .sub { font-size: .84rem; color: var(--muted); }
+.top-aparato { margin: -12px 0 22px; color: var(--ink-2); }
+.top-aparato b { color: var(--ink); }
+.formula-curva { margin: 0 0 6px; color: var(--ink-2); font-size: .95rem; }
+.formula-curva .mono { color: var(--ink); }
+.ejemplo-botones { display: flex; flex-wrap: wrap; gap: 8px; }
+.math details > summary { font-family: var(--font-display); font-size: 1.12rem; }
+@media (max-width: 640px) {
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 0; }
+  .stat:nth-child(3) { grid-column: 1 / -1; border-left: 0; padding: 14px 0 0; border-top: 1px solid var(--line); }
+}
+@media (max-width: 1180px) {
+  .bill { grid-template-columns: 1fr; }
+}
+
+/* ventana del formulario en navegadores sin <dialog> (celulares viejos) */
+#editor.sin-modal { position: fixed; inset: 12px; margin: auto; z-index: 50; height: fit-content; box-shadow: 0 0 0 100vmax #0c241d85, 0 24px 70px #0c241d40; }
+.sin-js { margin: 16px; padding: 14px 16px; border-radius: 10px; background: #fbf1d8; color: #5c3a08; border: 1px solid #e8cf8f; }
+
+/* acciones sobre toda la lista de aparatos */
+.acciones-aparatos { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn.quitar-todos { color: var(--crit); }
+.btn.confirmando { background: var(--crit-soft); border-color: var(--crit); color: var(--crit); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.nota-ciclo { display: inline-block; margin-top: 4px; font-size: .85rem; color: var(--muted); }
+
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="#resumen" aria-label="VoltiControl, inicio">
+      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true">
+        <circle cx="15" cy="15" r="13.5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <path d="M16.6 5.5 9.5 16.4h5.1l-1.4 8.1 7.3-11h-5.2z" fill="var(--energy)" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+      </svg>
+      <b>VoltiControl</b>
+    </a>
+    <nav class="nav" aria-label="Secciones">
+      <a href="#resumen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>Resumen</a>
+      <a href="#aparatos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v5m8-5v5M6 8h12v3a6 6 0 0 1-12 0V8Zm6 9v4"/></svg>Aparatos</a>
+      <a href="#ahorro"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M8 4v4m8 2v4m-6 2v4"/></svg>Simulador</a>
+      <a href="#medidor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17a8 8 0 1 1 16 0H4Zm8-3 3-4"/></svg>Contador</a>
+      <a href="#tarifa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 6h6m-6 4h6"/></svg>Tarifa</a>
+      <a href="#matematica"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 4H7l6 8-6 8h10"/></svg>La matemática</a>
+    </nav>
+  </div>
+</header>
+
+<div class="lienzo">
+<noscript><p class="sin-js"><b>Esta vista no ejecuta la app.</b> Abre el archivo con Chrome o Safari (en el celular: botón de compartir o los tres puntos → "Abrir con Chrome").</p></noscript>
+<main id="inicio">
+
+  <!-- RESUMEN -->
+  <section class="block" id="resumen">
+    <div class="wrap">
+      <div class="sec-head resumen-head">
+        <h1 tabindex="-1">Consumo eléctrico</h1>
+        <details id="aviso-ejemplo">
+          <summary>Hogar de ejemplo</summary>
+          <div class="ejemplo-opciones">
+            <p>Los aparatos y las lecturas iniciales son de demostración.</p>
+            <div class="ejemplo-botones">
+              <button class="btn small" id="btn-limpiar" type="button">Empezar desde cero</button>
+              <button class="btn small ghost" id="btn-ocultar-aviso" type="button">Usar el ejemplo</button>
+            </div>
+          </div>
+        </details>
+      </div>
+      <p class="lead-resumen">Descubre qué aparatos suben tu factura. VoltiControl integra la curva de potencia de tu casa para calcular los kWh, estima la factura con la tarifa por bloques y te muestra cuánto ahorras si cambias tus hábitos.</p>
+      <div class="stats" id="stats"></div>
+      <p class="top-aparato" id="top-aparato"></p>
+
+      <div class="panel curva-principal">
+        <div class="cabecera-curva">
+          <h2>Curva del día</h2>
+          <div class="legend"><span><i class="energy"></i>Potencia (kW)</span><span id="leyenda-trap"><i class="trap"></i>Trapecios</span></div>
+        </div>
+        <p class="formula-curva">La energía del día es el área bajo la curva: <span class="mono">E = ∫₀²⁴ P(t) dt</span> = <b id="e-dia"></b></p>
+        <div class="chart" id="grafico-curva"></div>
+        <details id="curva" class="curva-detalle">
+          <summary>Comparar con la regla del trapecio</summary>
+          <div class="readout">
+            <div>
+              <div class="label">Área exacta bajo la curva</div>
+              <div class="big" id="r-exacta"></div>
+            </div>
+            <div>
+              <div class="label" id="r-trap-label">Regla del trapecio</div>
+              <div class="big" id="r-trap"></div>
+              <div id="r-error" style="margin-top:4px"></div>
+            </div>
+            <div class="sep"></div>
+            <div class="n-control">
+              <label class="label" for="n-slider">Número de trapecios (n)</label>
+              <input type="range" id="n-slider" min="0" max="7" step="1">
+              <div class="ticks"><span>4</span><span>6</span><span>8</span><span>12</span><span>24</span><span>48</span><span>96</span><span>288</span></div>
+            </div>
+            <label class="check"><input type="checkbox" id="mostrar-trap"> Mostrar trapecios en la gráfica</label>
+            <p style="font-size:.9rem;color:var(--ink-2)" id="r-explica"></p>
+          </div>
+        </details>
+      </div>
+
+      <div class="acciones-resumen">
+        <a class="btn primary" href="#aparatos">Ver aparatos <span aria-hidden="true">↗</span></a>
+        <a class="btn" href="#ahorro">Simular ahorro <span aria-hidden="true">↗</span></a>
+      </div>
+
+      <details class="panel desplegable" open>
+        <summary>Factura estimada</summary>
+        <p class="nota">Importes con la tarifa de referencia (puedes cambiarla en Tarifa).</p>
+        <div class="bill">
+          <div class="panel">
+            <h3>Desglose de la factura estimada</h3>
+            <table id="tabla-factura" style="margin-top:10px"></table>
+          </div>
+          <div class="panel">
+            <h3>¿En qué bloque tarifario estás?</h3>
+            <p style="color:var(--muted);font-size:.92rem;margin-top:4px">Mientras más kWh consumes en el mes, más caro sale cada kWh adicional.</p>
+            <div class="scale-wrap"><div class="scale" id="escala"></div></div>
+            <p class="source" id="escala-nota"></p>
+          </div>
+        </div>
+      </details>
+
+      <details class="panel desplegable">
+        <summary>Consumo por aparato</summary>
+        <div class="panel" style="margin-top:20px">
+          <div class="sec-head" style="margin-bottom:12px">
+            <div>
+              <h3>¿Quién pesa más en la factura?</h3>
+              <p style="margin-top:4px">Consumo de cada aparato en el período y su parte de la factura, al precio promedio por kWh.</p>
+            </div>
+          </div>
+          <div class="bars" id="barras"></div>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- APARATOS -->
+  <section class="block" id="aparatos">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+          <h2 tabindex="-1">Aparatos</h2>
+          <p>Cada aparato aporta un rectángulo de energía: potencia × horas × cantidad × ciclo.</p>
+        </div>
+        <div class="acciones-aparatos">
+          <button class="btn primary" id="btn-agregar" type="button">+ Agregar aparato</button>
+          <button class="btn" id="btn-restaurar-aparatos" type="button" title="Vuelve a cargar los 12 aparatos del hogar de ejemplo">↺ Restaurar ejemplo</button>
+          <button class="btn quitar-todos" id="btn-quitar-todos" type="button">Quitar todos</button>
+        </div>
+      </div>
+      <div class="appliances">
+        <div class="panel">
+          <div class="list-head" aria-hidden="true">
+            <span>Aparato</span><span class="r">Potencia</span><span>Horario</span><span class="r">Horas/día</span><span class="r">kWh/día</span><span></span>
+          </div>
+          <div id="lista-aparatos"></div>
+        </div>
+        <dialog aria-labelledby="form-titulo" id="editor">
+          <form class="form" id="form-aparato" novalidate>
+            <div class="editor-head">
+              <h3 id="form-titulo">Agregar un aparato</h3>
+              <button class="btn ghost" type="button" id="cerrar-editor" aria-label="Cerrar formulario">✕</button>
+            </div>
+            <label class="field">Elegir de la lista
+              <select id="f-catalogo"></select>
+            </label>
+            <label class="field">Nombre
+              <input type="text" id="f-nombre" maxlength="60" placeholder="Ej.: Aire de la habitación" autocomplete="off">
+            </label>
+            <div class="three">
+              <label class="field">Potencia (W)
+                <input type="number" id="f-watts" min="1" max="20000" step="1" inputmode="numeric">
+              </label>
+              <label class="field">Cantidad
+                <input type="number" id="f-cantidad" min="1" max="50" step="1" value="1" inputmode="numeric">
+              </label>
+            </div>
+            <input type="hidden" id="f-horario">
+            <fieldset class="horario">
+              <legend>Horario de uso</legend>
+              <label class="check"><input type="checkbox" id="f-todo-dia"> Todo el día</label>
+              <div id="intervalos"><div id="primer-intervalo"></div></div>
+              <div id="intervalos-extra"></div>
+              <button type="button" class="btn small" id="agregar-intervalo">+ Otro horario</button>
+            </fieldset>
+            <div class="preview" id="f-preview">Completa los datos para ver cuánto consumirá.</div>
+            <div class="error" id="f-error" role="alert"></div>
+            <div class="buttons">
+              <button class="btn primary" type="submit" id="f-guardar">Agregar aparato</button>
+              <button class="btn" type="button" id="f-cancelar" hidden>Cancelar</button>
+            </div>
+          </form>
+        </dialog>
+      </div>
+    </div>
+  </section>
+
+  <!-- SIMULADOR -->
+  <section class="block" id="ahorro">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+          <h2>Simulador de ahorro</h2>
+          <p>Mueve las barras para usar cada aparato menos horas al día y mira cuánto baja la factura.</p>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn small" type="button" id="btn-aire" hidden>Probar: aire 2 horas menos</button>
+          <button class="btn small ghost" type="button" id="btn-reiniciar-sim">Reiniciar</button>
+        </div>
+      </div>
+      <div class="save-layout">
+        <div class="panel sliders" id="sliders"></div>
+        <div class="panel resultado"><p class="nota">Importes con la tarifa de referencia</p><div class="result" id="resultado-ahorro"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CONTADOR -->
+  <section class="block" id="medidor">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+          <h2>Lecturas del contador</h2>
+          <p>Anota cada día el número que marca tu contador. Con esas lecturas VoltiControl calcula tu ritmo real de consumo y proyecta cuántos kWh tendrás al cerrar el período.</p>
+          <p class="nota" id="origen-lecturas">Incluye lecturas de ejemplo.</p>
+        </div>
+      </div>
+      <div class="meter-layout">
+        <div class="panel">
+          <div class="legend">
+            <span><i class="real"></i>kWh acumulados (lecturas)</span>
+            <span><i class="proj"></i>Proyección</span>
+          </div>
+          <div class="chart" id="grafico-medidor"></div>
+          <div class="facts" id="hechos-medidor"></div>
+        </div>
+        <div class="panel">
+          <form class="form" id="form-lectura" novalidate>
+            <h3>Agregar lectura</h3>
+            <div class="two">
+              <label class="field">Fecha
+                <input type="date" id="l-fecha">
+              </label>
+              <label class="field">Lectura (kWh)
+                <input type="number" id="l-valor" min="0" step="0.1" inputmode="decimal" placeholder="15297">
+              </label>
+            </div>
+            <div class="error" id="l-error" role="alert"></div>
+            <div class="buttons"><button class="btn primary" type="submit">Guardar lectura</button></div>
+          </form>
+          <div class="readings" id="lista-lecturas" style="margin-top:14px"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TARIFA -->
+  <section class="block" id="tarifa">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+          <h2>Tarifa eléctrica</h2>
+          <p>Precio por kWh de cada bloque de la tarifa residencial. Cópialos de tu factura de Edeeste, Edesur o Edenorte si son distintos.</p>
+        </div>
+        <button class="btn small ghost" type="button" id="btn-tarifa-ref">Restaurar valores de referencia</button>
+      </div>
+      <div class="panel">
+        <div class="tariff">
+          <label class="field">0 a 200 kWh (RD$/kWh)<input type="number" id="t-0" min="0" step="0.01"></label>
+          <label class="field">201 a 300 kWh (RD$/kWh)<input type="number" id="t-1" min="0" step="0.01"></label>
+          <label class="field">301 a 700 kWh (RD$/kWh)<input type="number" id="t-2" min="0" step="0.01"></label>
+          <label class="field">Más de 700 kWh (RD$/kWh)<input type="number" id="t-3" min="0" step="0.01"></label>
+        </div>
+        <div class="tariff-extra">
+          <label class="field">Cargo fijo mensual (RD$)<input type="number" id="t-fijo" min="0" step="1"></label>
+          <label class="field">Días del período de facturación<input type="number" id="t-periodo" min="1" max="62" step="1"></label>
+        </div>
+        <details class="reglas">
+          <summary>Reglas cuando pasas de 700 kWh</summary>
+          <div class="tariff-checks">
+            <label class="check"><input type="checkbox" id="t-todo"> Si pasas de 700 kWh, todo el consumo se cobra al precio del último bloque</label>
+            <label class="check"><input type="checkbox" id="t-itbis"> Si pasas de 700 kWh, se cobra ITBIS (18 %) sobre la factura</label>
+          </div>
+        </details>
+        <p class="source">Valores de referencia: 0–200 kWh (RD$ 6.09) y más de 700 kWh (RD$ 13.09) según declaraciones del Ministerio de Energía y Minas publicadas en octubre de 2026. Los bloques intermedios, el cargo fijo y la regla del ITBIS vienen de guías públicas y pueden variar según la distribuidora. Compáralos con tu factura.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- MATEMÁTICA -->
+  <section class="block" id="matematica">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+          <h2>La matemática detrás</h2>
+          <p>VoltiControl aplica el Cálculo Integral a un problema de cada día: entender la factura de la luz.</p>
+        </div>
+      </div>
+      <div class="math">
+        <details class="panel" open>
+          <summary>La energía es un área</summary>
+          <div class="formula">E = ∫<sub>0</sub><sup>24</sup> P(t) dt</div>
+          <p>La potencia P(t) dice cuántos vatios usa la casa en cada instante. Integrar la potencia en vatios a lo largo de las horas da la energía en Wh. Al dividir entre 1,000 se obtienen los kWh que mide el contador.</p>
+          <p>Con potencia constante, el área es un rectángulo. Un aire de 1,200 W que trabaja el 70 % del tiempo durante 7 horas consume 1,200 × 0.7 × 7 = 5,880 Wh, es decir, <b>5.88 kWh</b>.</p>
+        </details>
+        <details class="panel" open>
+          <summary>Regla del trapecio</summary>
+          <div class="formula">T<sub>n</sub> = <span style="font-size:.9em">h⁄2</span> [P(t<sub>0</sub>) + 2P(t<sub>1</sub>) + … + 2P(t<sub>n−1</sub>) + P(t<sub>n</sub>)]</div>
+          <p>Divide el día en n partes de ancho h = 24/n y suma el área de los trapecios. Así se calcula la energía cuando solo se conocen mediciones cada cierto tiempo, como las de un sensor.</p>
+          <p>Una malla más fina suele acercar la aproximación al área exacta. El error puede variar según dónde caen las muestras. Los aparatos que se usan pocos minutos, como el microondas, son los que más se escapan con n pequeño.</p>
+        </details>
+        <details class="panel" open>
+          <summary>Del día al mes</summary>
+          <div class="formula">E<sub>período</sub> = E<sub>día</sub> × días</div>
+          <p>Las lecturas del contador son la energía acumulada. Su pendiente, el ritmo en kWh por día, es la derivada de esa acumulación, y con ella se proyecta el cierre del período mediante una recta de mínimos cuadrados.</p>
+          <p>La factura es una función por partes: cada bloque de kWh tiene su propio precio, y al pasar de 700 kWh cambia la regla de cobro.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <b>VoltiControl</b> · Proyecto innovador de Cálculo Integral, sección 4<br>
+      Instituto Tecnológico de Las Américas (ITLA) · Prof. Lcdo. David Mercedes
+    </div>
+    <div>
+      Leonardo Pérez · Randy Benítez · Eddian Hernández · Diego Martinez<br>
+      Tus datos se guardan solo en este navegador.
+    </div>
+  </div>
+</footer>
+</div>
+
+<div class="sr-only" aria-live="polite" id="anuncio"></div>
+
+<script>
+/*
+ * VoltiControl — núcleo matemático.
+ * Funciones puras (sin DOM) para calcular el consumo eléctrico con integrales.
+ *
+ *   Energía consumida en un día:   E = ∫₀²⁴ P(t) dt   (P en W, t en horas → Wh)
+ *
+ * La curva P(t) del hogar es la suma de la potencia de cada aparato mientras
+ * está encendido. Como cada aparato tiene potencia constante en sus horarios,
+ * la integral exacta se obtiene sumando áreas de rectángulos. La regla del
+ * trapecio aproxima esa misma integral con n subintervalos.
+ */
+(function (root) {
+  'use strict';
+
+  // ---------- Horarios ----------
+
+  /** "22:30", "7", "7am", "2:15 pm" → horas decimales (22.5). NaN si no es válida. */
+  function parseHora(texto) {
+    const m = String(texto).trim().toLowerCase()
+      .match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.\s?m\.?|p\.\s?m\.?)?$/);
+    if (!m) return NaN;
+    let h = Number(m[1]);
+    const min = m[2] ? Number(m[2]) : 0;
+    if (min > 59) return NaN;
+    if (m[3]) {
+      const sufijo = m[3].replace(/[\s.]/g, '');
+      if (h < 1 || h > 12) return NaN;
+      if (sufijo === 'pm' && h !== 12) h += 12;
+      if (sufijo === 'am' && h === 12) h = 0;
+    }
+    if (h > 24 || (h === 24 && min > 0)) return NaN;
+    return h + min / 60;
+  }
+
+  /**
+   * "22:00-05:00, 13:00-14:00" → [[22, 5], [13, 14]].
+   * Un rango cuyo fin es menor que su inicio cruza la medianoche.
+   * Devuelve null si el texto no se puede leer.
+   */
+  function parseHorario(texto) {
+    const limpio = String(texto || '').trim().toLowerCase();
+    if (!limpio) return null;
+    if (/^(24\s*h(oras)?|todo el d[ií]a|siempre)$/.test(limpio)) return [[0, 24]];
+    const partes = limpio.split(/[,;]|\s+y\s+/).map(function (p) { return p.trim(); }).filter(Boolean);
+    const rangos = [];
+    for (const parte of partes) {
+      const extremos = parte.split(/\s*[-–—]\s*|\s+a\s+|\s+hasta\s+/);
+      if (extremos.length !== 2) return null;
+      const inicio = parseHora(extremos[0].replace(/^de\s+/, ''));
+      const fin = parseHora(extremos[1]);
+      if (isNaN(inicio) || isNaN(fin)) return null;
+      const a = inicio % 24;
+      const b = fin === 24 ? 24 : fin % 24;
+      if (a === b) return null;
+      rangos.push([a, b]);
+    }
+    return rangos;
+  }
+
+  function formatoHora(h) {
+    const total = Math.round(h * 60);
+    const hh = Math.floor(total / 60) % 24;
+    const mm = total % 60;
+    return String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+  }
+
+  function textoHorario(rangos) {
+    if (rangos.length === 1 && rangos[0][0] === 0 && rangos[0][1] === 24) return '24 horas';
+    return rangos.map(function (r) {
+      return formatoHora(r[0]) + '–' + (r[1] === 24 ? '24:00' : formatoHora(r[1]));
+    }).join(', ');
+  }
+
+  /** Duración de un rango en horas (considera el cruce de medianoche). */
+  function duracionRango(r) {
+    return r[1] > r[0] ? r[1] - r[0] : 24 - r[0] + r[1];
+  }
+
+  function horasDeUso(rangos) {
+    return rangos.reduce(function (s, r) { return s + duracionRango(r); }, 0);
+  }
+
+  /** ¿Está encendido a la hora t? Intervalos semiabiertos [inicio, fin). */
+  function encendido(t, rangos) {
+    // EPS evita errores de redondeo cuando t cae justo en el borde de un rango.
+    const EPS = 1e-9;
+    const x = ((t % 24) + 24) % 24;
+    return rangos.some(function (r) {
+      const a = r[0] - EPS, b = r[1] - EPS;
+      return r[0] < r[1] ? (x >= a && x < b) : (x >= a || x < b);
+    });
+  }
+
+  // ---------- Potencia y energía ----------
+
+  /** Potencia promedio de un aparato encendido, en W (incluye cantidad y ciclo de trabajo). */
+  function potenciaMedia(ap) {
+    return ap.watts * ap.cantidad * ap.ciclo;
+  }
+
+  /** P(t): potencia total del hogar a la hora t, en W. */
+  function potenciaEn(t, aparatos) {
+    let p = 0;
+    for (const ap of aparatos) if (encendido(t, ap.rangos)) p += potenciaMedia(ap);
+    return p;
+  }
+
+  /** Energía diaria exacta de un aparato en kWh: área del rectángulo potencia × tiempo. */
+  function energiaDiaria(ap) {
+    return potenciaMedia(ap) * horasDeUso(ap.rangos) / 1000;
+  }
+
+  /** ∫₀²⁴ P(t) dt exacta en kWh (suma de las áreas de cada aparato). */
+  function energiaDiariaTotal(aparatos) {
+    return aparatos.reduce(function (s, ap) { return s + energiaDiaria(ap); }, 0);
+  }
+
+  /** Regla del trapecio: ∫ₐᵇ f(t) dt ≈ h/2 · [f(t₀) + 2f(t₁) + … + 2f(tₙ₋₁) + f(tₙ)]. */
+  function trapecio(f, a, b, n) {
+    const h = (b - a) / n;
+    let suma = (f(a) + f(b)) / 2;
+    for (let i = 1; i < n; i++) suma += f(a + i * h);
+    return suma * h;
+  }
+
+  /** Aproximación de la energía diaria (kWh) con n trapecios. */
+  function energiaTrapecio(aparatos, n) {
+    return trapecio(function (t) { return potenciaEn(t, aparatos); }, 0, 24, n) / 1000;
+  }
+
+  // ---------- Tarifa ----------
+
+  /**
+   * Factura de un período con tarifa por bloques.
+   * tarifa = { bloques: [{hasta, precio}...] (último hasta = null),
+   *            cargoFijo, ultimoBloqueATodo, itbisSobreUmbral, itbis }
+   */
+  function factura(kwh, tarifa) {
+    const bloques = tarifa.bloques;
+    const umbral = bloques[bloques.length - 2].hasta;
+    const lineas = [];
+    let energia = 0;
+    let indiceBloque = 0;
+
+    if (kwh > umbral && tarifa.ultimoBloqueATodo) {
+      const precio = bloques[bloques.length - 1].precio;
+      lineas.push({ desde: 0, hasta: null, kwh: kwh, precio: precio, monto: kwh * precio });
+      energia = kwh * precio;
+      indiceBloque = bloques.length - 1;
+    } else {
+      let anterior = 0;
+      for (let i = 0; i < bloques.length; i++) {
+        const tope = bloques[i].hasta === null ? Infinity : bloques[i].hasta;
+        const cantidad = Math.max(0, Math.min(kwh, tope) - anterior);
+        if (cantidad > 0) {
+          lineas.push({ desde: anterior, hasta: bloques[i].hasta, kwh: cantidad, precio: bloques[i].precio, monto: cantidad * bloques[i].precio });
+          energia += cantidad * bloques[i].precio;
+          indiceBloque = i;
+        }
+        if (kwh <= tope) break;
+        anterior = tope;
+      }
+    }
+
+    const subtotal = energia + tarifa.cargoFijo;
+    const itbis = (kwh > umbral && tarifa.itbisSobreUmbral) ? subtotal * tarifa.itbis : 0;
+    return {
+      kwh: kwh,
+      lineas: lineas,
+      energia: energia,
+      cargoFijo: tarifa.cargoFijo,
+      itbis: itbis,
+      total: subtotal + itbis,
+      bloque: indiceBloque,
+      precioMedio: kwh > 0 ? (subtotal + itbis) / kwh : 0
+    };
+  }
+
+  // ---------- Medidor ----------
+
+  function diasEntre(fechaA, fechaB) {
+    const a = Date.UTC(+fechaA.slice(0, 4), +fechaA.slice(5, 7) - 1, +fechaA.slice(8, 10));
+    const b = Date.UTC(+fechaB.slice(0, 4), +fechaB.slice(5, 7) - 1, +fechaB.slice(8, 10));
+    return Math.round((b - a) / 86400000);
+  }
+
+  /**
+   * A partir de lecturas del contador {fecha:'AAAA-MM-DD', valor:kWh}
+   * calcula los puntos acumulados, el ritmo diario (pendiente por mínimos
+   * cuadrados) y la proyección al final del período.
+   */
+  function proyeccion(lecturas, periodo) {
+    const orden = lecturas.slice().sort(function (x, y) { return x.fecha < y.fecha ? -1 : x.fecha > y.fecha ? 1 : 0; });
+    if (orden.length < 2) return null;
+    const base = orden[0];
+    const puntos = orden.map(function (l) {
+      return { fecha: l.fecha, dia: diasEntre(base.fecha, l.fecha), acumulado: l.valor - base.valor, valor: l.valor };
+    });
+    const n = puntos.length;
+    const mx = puntos.reduce(function (s, p) { return s + p.dia; }, 0) / n;
+    const my = puntos.reduce(function (s, p) { return s + p.acumulado; }, 0) / n;
+    let sxy = 0, sxx = 0;
+    for (const p of puntos) { sxy += (p.dia - mx) * (p.acumulado - my); sxx += (p.dia - mx) * (p.dia - mx); }
+    if (sxx === 0) return null;
+    const ritmo = Math.max(0, sxy / sxx); // kWh por día
+    const ultimo = puntos[n - 1];
+    const diasRestantes = Math.max(0, periodo - ultimo.dia);
+    const total = ultimo.acumulado + ritmo * diasRestantes;
+    return { puntos: puntos, ritmo: ritmo, ultimo: ultimo, total: total, periodo: periodo, diasRestantes: diasRestantes };
+  }
+
+  /** Día (desde la primera lectura) en que el acumulado alcanzaría `limite` kWh, o null. */
+  function diaQueAlcanza(proy, limite) {
+    if (!proy || proy.ultimo.acumulado >= limite || proy.ritmo <= 0) return null;
+    const dia = proy.ultimo.dia + (limite - proy.ultimo.acumulado) / proy.ritmo;
+    return dia <= proy.periodo ? dia : null;
+  }
+
+  // ---------- Ahorro ----------
+
+  /** Energía diaria (kWh) si cada aparato se usa `reducciones[id]` horas menos al día. */
+  function energiaConReduccion(aparatos, reducciones) {
+    return aparatos.reduce(function (s, ap) {
+      const horas = Math.max(0, horasDeUso(ap.rangos) - (reducciones[ap.id] || 0));
+      return s + potenciaMedia(ap) * horas / 1000;
+    }, 0);
+  }
+
+  const VC = {
+    parseHora: parseHora,
+    parseHorario: parseHorario,
+    formatoHora: formatoHora,
+    textoHorario: textoHorario,
+    horasDeUso: horasDeUso,
+    encendido: encendido,
+    potenciaMedia: potenciaMedia,
+    potenciaEn: potenciaEn,
+    energiaDiaria: energiaDiaria,
+    energiaDiariaTotal: energiaDiariaTotal,
+    trapecio: trapecio,
+    energiaTrapecio: energiaTrapecio,
+    factura: factura,
+    diasEntre: diasEntre,
+    proyeccion: proyeccion,
+    diaQueAlcanza: diaQueAlcanza,
+    energiaConReduccion: energiaConReduccion
+  };
+
+  if (typeof module !== 'undefined' && module.exports) module.exports = VC;
+  else root.VC = VC;
+})(typeof window !== 'undefined' ? window : this);
+
+</script>
+<script>
+/*
+ * VoltiControl — datos de referencia.
+ * Potencias típicas de aparatos comunes en hogares dominicanos y la tarifa
+ * residencial de referencia. Todo es editable desde la aplicación.
+ */
+(function (root) {
+  'use strict';
+
+  // ciclo: fracción del tiempo encendido en que el aparato realmente consume
+  // (la nevera y el aire prenden y apagan el compresor).
+  const CATALOGO = [
+    { nombre: 'Nevera', watts: 150, ciclo: 0.4, horario: '24 horas' },
+    { nombre: 'Freezer', watts: 200, ciclo: 0.45, horario: '24 horas' },
+    { nombre: 'Aire acondicionado 12,000 BTU', watts: 1200, ciclo: 0.7, horario: '22:00-05:00' },
+    { nombre: 'Aire acondicionado 12,000 BTU inverter', watts: 900, ciclo: 0.55, horario: '22:00-05:00' },
+    { nombre: 'Abanico de techo', watts: 75, ciclo: 1, horario: '21:00-06:00' },
+    { nombre: 'Abanico de pie', watts: 55, ciclo: 1, horario: '13:00-17:00' },
+    { nombre: 'Televisor LED 43"', watts: 80, ciclo: 1, horario: '18:00-23:00' },
+    { nombre: 'Bombillo LED', watts: 9, ciclo: 1, horario: '18:00-23:00' },
+    { nombre: 'Bombillo incandescente', watts: 60, ciclo: 1, horario: '18:00-23:00' },
+    { nombre: 'Laptop', watts: 65, ciclo: 1, horario: '14:00-20:00' },
+    { nombre: 'Computadora de escritorio', watts: 250, ciclo: 1, horario: '14:00-20:00' },
+    { nombre: 'Consola de videojuegos', watts: 150, ciclo: 1, horario: '20:00-22:00' },
+    { nombre: 'Router Wi‑Fi', watts: 10, ciclo: 1, horario: '24 horas' },
+    { nombre: 'Lavadora', watts: 500, ciclo: 1, horario: '09:00-09:30' },
+    { nombre: 'Secadora eléctrica', watts: 3000, ciclo: 1, horario: '10:00-10:30' },
+    { nombre: 'Plancha', watts: 1200, ciclo: 0.6, horario: '07:00-07:20' },
+    { nombre: 'Microondas', watts: 1100, ciclo: 1, horario: '12:00-12:10, 19:00-19:10' },
+    { nombre: 'Arrocera', watts: 700, ciclo: 1, horario: '11:00-11:30' },
+    { nombre: 'Licuadora', watts: 400, ciclo: 1, horario: '07:00-07:05' },
+    { nombre: 'Cafetera', watts: 800, ciclo: 1, horario: '06:30-06:45' },
+    { nombre: 'Bomba de agua', watts: 750, ciclo: 1, horario: '06:00-06:30' },
+    { nombre: 'Calentador de agua', watts: 1500, ciclo: 0.5, horario: '06:00-07:00' },
+    { nombre: 'Secador de pelo', watts: 1500, ciclo: 1, horario: '07:00-07:10' },
+    { nombre: 'Cargador de celular', watts: 10, ciclo: 1, horario: '22:00-01:00' }
+  ];
+
+  // Hogar de ejemplo (se muestra al abrir la app por primera vez).
+  const EJEMPLO_APARATOS = [
+    { nombre: 'Nevera', watts: 150, cantidad: 1, ciclo: 0.4, horario: '24 horas' },
+    { nombre: 'Aire acondicionado 12,000 BTU', watts: 1200, cantidad: 1, ciclo: 0.7, horario: '22:00-05:00' },
+    { nombre: 'Abanico de techo', watts: 75, cantidad: 2, ciclo: 1, horario: '21:00-06:00' },
+    { nombre: 'Abanico de pie', watts: 55, cantidad: 1, ciclo: 1, horario: '13:00-17:00' },
+    { nombre: 'Televisor LED 43"', watts: 80, cantidad: 1, ciclo: 1, horario: '18:00-23:00' },
+    { nombre: 'Bombillo LED', watts: 9, cantidad: 6, ciclo: 1, horario: '18:00-23:00' },
+    { nombre: 'Laptop', watts: 65, cantidad: 1, ciclo: 1, horario: '14:00-20:00' },
+    { nombre: 'Router Wi‑Fi', watts: 10, cantidad: 1, ciclo: 1, horario: '24 horas' },
+    { nombre: 'Lavadora', watts: 500, cantidad: 1, ciclo: 1, horario: '09:00-09:30' },
+    { nombre: 'Microondas', watts: 1100, cantidad: 1, ciclo: 1, horario: '12:00-12:10, 19:00-19:10' },
+    { nombre: 'Bomba de agua', watts: 750, cantidad: 1, ciclo: 1, horario: '06:00-06:30' },
+    { nombre: 'Plancha', watts: 1200, cantidad: 1, ciclo: 0.6, horario: '07:00-07:20' }
+  ];
+
+  // Lecturas de ejemplo del contador (kWh acumulados que marca el medidor).
+  const EJEMPLO_LECTURAS = [
+    { fecha: '2026-11-01', valor: 15230 },
+    { fecha: '2026-11-02', valor: 15241 },
+    { fecha: '2026-11-03', valor: 15253 },
+    { fecha: '2026-11-04', valor: 15263 },
+    { fecha: '2026-11-05', valor: 15275 },
+    { fecha: '2026-11-06', valor: 15286 }
+  ];
+
+  // Tarifa residencial de referencia (RD$). 0–200 y más de 700 kWh: valores
+  // citados por el Ministerio de Energía y Minas (oct. 2026). Bloques
+  // intermedios y cargo fijo: referencias públicas. Verificar con la factura.
+  const TARIFA = {
+    bloques: [
+      { hasta: 200, precio: 6.09 },
+      { hasta: 300, precio: 9.5 },
+      { hasta: 700, precio: 11.5 },
+      { hasta: null, precio: 13.09 }
+    ],
+    cargoFijo: 120,
+    ultimoBloqueATodo: true,
+    itbisSobreUmbral: true,
+    itbis: 0.18
+  };
+
+  // Ciclo automático: la app lo deduce del nombre del aparato, así el usuario
+  // no tiene que saber qué es. Primero busca el nombre exacto en el catálogo;
+  // si no está, reconoce por palabras los aparatos con termostato.
+  const REGLAS_CICLO = [
+    { patron: /freidora/, ciclo: 1 },
+    { patron: /inverter/, ciclo: 0.55 },
+    { patron: /aire|acondicionado|split|\ba\/?c\b/, ciclo: 0.7 },
+    { patron: /nevera|nevecon|refrigerador|frigorifico/, ciclo: 0.4 },
+    { patron: /freezer|congelador/, ciclo: 0.45 },
+    { patron: /plancha/, ciclo: 0.6 },
+    { patron: /calentador|boiler|\btermo\b/, ciclo: 0.5 }
+  ];
+
+  function normalizar(texto) {
+    return String(texto || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+  }
+
+  function cicloAutomatico(nombre) {
+    const n = normalizar(nombre);
+    if (!n) return 1;
+    for (let i = 0; i < CATALOGO.length; i++) {
+      if (normalizar(CATALOGO[i].nombre) === n) return CATALOGO[i].ciclo;
+    }
+    for (let i = 0; i < REGLAS_CICLO.length; i++) {
+      if (REGLAS_CICLO[i].patron.test(n)) return REGLAS_CICLO[i].ciclo;
+    }
+    return 1;
+  }
+
+  const DATOS = { CATALOGO: CATALOGO, EJEMPLO_APARATOS: EJEMPLO_APARATOS, EJEMPLO_LECTURAS: EJEMPLO_LECTURAS, TARIFA: TARIFA, cicloAutomatico: cicloAutomatico };
+  if (typeof module !== 'undefined' && module.exports) module.exports = DATOS;
+  else root.VC_DATOS = DATOS;
+})(typeof window !== 'undefined' ? window : this);
+
+</script>
+<script>
+/*
+ * VoltiControl — interfaz.
+ * Lee y guarda el estado, y dibuja cada sección a partir de las funciones de calculos.js.
+ */
+(function () {
+  'use strict';
+
+  const VC = window.VC;
+  const D = window.VC_DATOS;
+  const CLAVE = 'volticontrol.v1';
+  const N_VALORES = [4, 6, 8, 12, 24, 48, 96, 288];
+  const SVGNS = 'http://www.w3.org/2000/svg';
+
+  // ---------- utilidades ----------
+  const $ = function (s, r) { return (r || document).querySelector(s); };
+  const fmt = function (n, d) {
+    if (d === undefined) d = 1;
+    return Number(n).toLocaleString('es-DO', { minimumFractionDigits: d, maximumFractionDigits: d });
+  };
+  const rd = function (n, d) { return 'RD$ ' + fmt(n, d === undefined ? 2 : d); };
+  const clonar = function (o) { return JSON.parse(JSON.stringify(o)); };
+  const esc = function (s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  };
+  let contador = 0;
+  const nuevoId = function () { return 'a' + Date.now().toString(36) + (contador++).toString(36); };
+
+  function svg(tag, attrs, padre) {
+    const el = document.createElementNS(SVGNS, tag);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    if (padre) padre.appendChild(el);
+    return el;
+  }
+
+  /** Máximo "bonito" para un eje y su paso. */
+  function escalaBonita(max, marcas) {
+    if (!(max > 0)) max = 1;
+    const bruto = max / (marcas || 4);
+    const pot = Math.pow(10, Math.floor(Math.log10(bruto)));
+    const r = bruto / pot;
+    const paso = (r <= 1 ? 1 : r <= 2 ? 2 : r <= 2.5 ? 2.5 : r <= 5 ? 5 : 10) * pot;
+    return { max: Math.ceil(max / paso) * paso, paso: paso };
+  }
+
+  function hoyISO() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function sumarDias(iso, dias) {
+    const d = new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)));
+    d.setUTCDate(d.getUTCDate() + Math.floor(dias));
+    return d.toISOString().slice(0, 10);
+  }
+  const MESES = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sept.', 'oct.', 'nov.', 'dic.'];
+  function fechaCorta(iso) { return (+iso.slice(8, 10)) + ' ' + MESES[+iso.slice(5, 7) - 1]; }
+
+  function anunciar(texto) { $('#anuncio').textContent = texto; }
+
+  // ---------- estado ----------
+  function aparatoDesde(o) {
+    return {
+      id: o.id || nuevoId(),
+      nombre: String(o.nombre || 'Aparato'),
+      watts: Number(o.watts) || 0,
+      cantidad: Math.max(1, Math.round(Number(o.cantidad) || 1)),
+      ciclo: Math.min(1, Math.max(0.01, Number(o.ciclo) || 1)),
+      horario: String(o.horario || ''),
+      rangos: VC.parseHorario(o.horario)
+    };
+  }
+
+  function estadoInicial() {
+    return {
+      aparatos: D.EJEMPLO_APARATOS.map(aparatoDesde),
+      lecturas: clonar(D.EJEMPLO_LECTURAS),
+      tarifa: clonar(D.TARIFA),
+      periodo: 30,
+      nIndice: 3,
+      trapecios: false,
+      reducciones: {},
+      ejemplo: true,
+      lecturasEjemplo: true
+    };
+  }
+
+  function cargar() {
+    const base = estadoInicial();
+    try {
+      const crudo = localStorage.getItem(CLAVE);
+      if (!crudo) return base;
+      const s = JSON.parse(crudo);
+      return {
+        aparatos: Array.isArray(s.aparatos) ? s.aparatos.map(aparatoDesde).filter(function (a) { return a.rangos; }) : base.aparatos,
+        lecturas: Array.isArray(s.lecturas) ? s.lecturas.filter(function (l) { return /^\d{4}-\d{2}-\d{2}$/.test(l.fecha) && isFinite(l.valor); }) : base.lecturas,
+        tarifa: s.tarifa && Array.isArray(s.tarifa.bloques) && s.tarifa.bloques.length === 4 ? Object.assign(clonar(D.TARIFA), s.tarifa) : base.tarifa,
+        periodo: s.periodo > 0 ? s.periodo : 30,
+        nIndice: s.nIndice >= 0 && s.nIndice < N_VALORES.length ? s.nIndice : 3,
+        trapecios: s.trapecios !== false,
+        reducciones: s.reducciones || {},
+        ejemplo: !!s.ejemplo,
+        lecturasEjemplo: s.lecturasEjemplo !== undefined ? !!s.lecturasEjemplo : !!s.ejemplo
+      };
+    } catch (e) {
+      return base;
+    }
+  }
+
+  function guardar() {
+    try {
+      const copia = Object.assign({}, estado, {
+        aparatos: estado.aparatos.map(function (a) {
+          return { id: a.id, nombre: a.nombre, watts: a.watts, cantidad: a.cantidad, ciclo: a.ciclo, horario: a.horario };
+        })
+      });
+      localStorage.setItem(CLAVE, JSON.stringify(copia));
+    } catch (e) { /* almacenamiento no disponible: la app sigue funcionando */ }
+  }
+
+  let estado = cargar();
+  let editandoId = null;
+
+  // ---------- cálculo central ----------
+
+  function actualizarOrigenLecturas() {
+    estado.lecturasEjemplo = estado.lecturas.some(function (l) {
+      return D.EJEMPLO_LECTURAS.some(function (e) { return e.fecha === l.fecha && e.valor === l.valor; });
+    });
+  }
+
+  function calcular() {
+    const diaria = VC.energiaDiariaTotal(estado.aparatos);
+    const periodoKwh = diaria * estado.periodo;
+    const fac = VC.factura(periodoKwh, estado.tarifa);
+    const porAparato = estado.aparatos.map(function (ap) {
+      const dia = VC.energiaDiaria(ap);
+      return { ap: ap, dia: dia, periodo: dia * estado.periodo, parte: diaria > 0 ? dia / diaria : 0, costo: dia * estado.periodo * fac.precioMedio };
+    }).sort(function (a, b) { return b.dia - a.dia; });
+    const proy = VC.proyeccion(estado.lecturas, estado.periodo);
+    return { diaria: diaria, periodoKwh: periodoKwh, factura: fac, porAparato: porAparato, proy: proy };
+  }
+
+  const NOMBRES_BLOQUE = ['0–200 kWh', '201–300 kWh', '301–700 kWh', 'más de 700 kWh'];
+  const ESTADO_BLOQUE = ['good', 'warn', 'warn', 'crit'];
+
+  function pillBloque(i) {
+    return '<span class="pill ' + ESTADO_BLOQUE[i] + '">Bloque ' + NOMBRES_BLOQUE[i] + '</span>';
+  }
+
+  // Ventana del formulario. Los navegadores viejos de celular no tienen showModal(),
+  // así que en ellos se muestra como capa fija con la clase "sin-modal".
+  function abrirEditor() {
+    const d = $('#editor');
+    if (d.open) return;
+    if (typeof d.showModal === 'function') d.showModal();
+    else { d.setAttribute('open', ''); d.classList.add('sin-modal'); }
+  }
+  function alCerrarEditor() {
+    limpiarFormulario();
+    renderAparatos();
+  }
+  function cerrarEditor() {
+    const d = $('#editor');
+    if (typeof d.close === 'function' && typeof d.showModal === 'function') { d.close(); return; }
+    d.removeAttribute('open');
+    d.classList.remove('sin-modal');
+    alCerrarEditor();
+  }
+
+  // Al editar aparatos o lecturas, el hogar deja de ser "de ejemplo".
+  function marcarEditado() {
+    estado.ejemplo = false;
+  }
+
+  // ---------- encabezado y resumen ----------
+
+  // Números que avanzan hasta su nuevo valor (idea tomada del "KPI Tile" de 21st.dev).
+  // Respeta "reducir movimiento" del sistema: en ese caso el número cambia sin animación.
+  const valoresPrevios = {};
+  const animaciones = {};
+  const sinMovimiento = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function animarNumero(clave, el, hasta, formato) {
+    const desde = clave in valoresPrevios ? valoresPrevios[clave] : 0;
+    valoresPrevios[clave] = hasta;
+    cancelAnimationFrame(animaciones[clave]);
+    if (sinMovimiento || Math.abs(hasta - desde) < 1e-9) { el.textContent = formato(hasta); return; }
+    const inicio = performance.now();
+    const duracion = 450;
+    function paso(ahora) {
+      const t = Math.min(1, (ahora - inicio) / duracion);
+      const suave = 1 - Math.pow(1 - t, 3);
+      el.textContent = formato(desde + (hasta - desde) * suave);
+      if (t < 1) animaciones[clave] = requestAnimationFrame(paso);
+    }
+    el.textContent = formato(desde);
+    animaciones[clave] = requestAnimationFrame(paso);
+  }
+
+  function renderResumen(c) {
+    const f = c.factura;
+    const top = c.porAparato[0];
+
+    $('#stats').innerHTML =
+      '<div class="stat"><span class="label">Consumo diario</span><span class="value"><span id="n-diaria">' + fmt(c.diaria, 2) + '</span><small>kWh</small></span><span class="sub">Área bajo la curva de 0 a 24 h</span></div>' +
+      '<div class="stat"><span class="label">Consumo · ' + estado.periodo + ' días</span><span class="value"><span id="n-periodo">' + fmt(c.periodoKwh, 0) + '</span><small>kWh</small></span><span class="sub">' + pillBloque(f.bloque) + '</span></div>' +
+      '<div class="stat"><span class="label">Factura estimada</span><span class="value" id="n-factura">' + rd(f.total, 0) + '</span><span class="sub">≈ ' + rd(f.precioMedio) + ' por kWh en promedio</span></div>';
+    animarNumero('diaria', $('#n-diaria'), c.diaria, function (v) { return fmt(v, 2); });
+    animarNumero('periodo', $('#n-periodo'), c.periodoKwh, function (v) { return fmt(v, 0); });
+    animarNumero('factura', $('#n-factura'), f.total, function (v) { return rd(v, 0); });
+    $('#top-aparato').innerHTML = top
+      ? 'Aparato que más consume: <b>' + esc(top.ap.nombre) + '</b> · ' + fmt(top.parte * 100, 0) + ' % del consumo · ' + rd(top.costo, 0) + ' en el período'
+      : 'Agrega aparatos para ver cuál consume más.';
+    $('#e-dia').textContent = fmt(c.diaria, 2) + ' kWh';
+
+    // tabla de factura
+    let filas = '<tr><th>Concepto</th><th class="r">kWh</th><th class="r p">RD$/kWh</th><th class="r">Monto</th></tr>';
+    if (!f.lineas.length) filas += '<tr><td>Energía</td><td class="r">0</td><td class="r p">—</td><td class="r">' + rd(0) + '</td></tr>';
+    f.lineas.forEach(function (l) {
+      const nombre = l.hasta === null && l.desde === 0 ? 'Todo el consumo (pasó de 700 kWh)' : 'Bloque ' + (l.desde === 0 ? '0' : l.desde + 1) + (l.hasta === null ? '+' : '–' + l.hasta) + ' kWh';
+      filas += '<tr><td>' + nombre + '</td><td class="r">' + fmt(l.kwh, 1) + '</td><td class="r p">' + fmt(l.precio, 2) + '</td><td class="r">' + rd(l.monto) + '</td></tr>';
+    });
+    filas += '<tr><td>Cargo fijo</td><td class="r"></td><td class="r p"></td><td class="r">' + rd(f.cargoFijo) + '</td></tr>';
+    if (f.itbis > 0) filas += '<tr><td>ITBIS (' + fmt(estado.tarifa.itbis * 100, 0) + ' %)</td><td class="r"></td><td class="r p"></td><td class="r">' + rd(f.itbis) + '</td></tr>';
+    filas += '<tr class="total"><td>Total estimado</td><td class="r">' + fmt(c.periodoKwh, 1) + '</td><td class="r p"></td><td class="r">' + rd(f.total) + '</td></tr>';
+    $('#tabla-factura').innerHTML = filas;
+
+    renderEscala(c.periodoKwh, f.bloque);
+  }
+
+  function renderEscala(kwh, bloque) {
+    const b = estado.tarifa.bloques;
+    const tope = Math.max(900, kwh * 1.08);
+    const limites = [0, b[0].hasta, b[1].hasta, b[2].hasta, tope];
+    let html = '<div class="scale-bar">';
+    for (let i = 0; i < 4; i++) {
+      const ancho = (limites[i + 1] - limites[i]) / tope * 100;
+      html += '<div class="seg' + (i === bloque ? ' on' : '') + '" style="width:' + ancho + '%" title="' + NOMBRES_BLOQUE[i] + ': RD$ ' + fmt(b[i].precio, 2) + '">' + fmt(b[i].precio, 2) + '</div>';
+    }
+    const pos = Math.min(100, kwh / tope * 100);
+    html += '<div class="scale-mark" style="left:calc(' + pos + '% - 1px)"><span>' + fmt(kwh, 0) + ' kWh</span></div></div>';
+    html += '<div class="scale-legend">' + limites.map(function (v, i) {
+      return '<span style="left:' + (v / tope * 100) + '%">' + (i === 4 ? fmt(v, 0) + ' kWh' : fmt(v, 0)) + '</span>';
+    }).join('') + '</div>';
+    $('#escala').innerHTML = html;
+    const sig = bloque < 3 ? b[bloque].hasta - kwh : null;
+    $('#escala-nota').innerHTML = sig !== null
+      ? 'Te faltan <b>' + fmt(sig, 0) + ' kWh</b> para pasar al bloque de ' + NOMBRES_BLOQUE[bloque + 1] + ', donde cada kWh cuesta RD$ ' + fmt(b[bloque + 1].precio, 2) + '.'
+      : 'Pasaste de 700 kWh: ' + (estado.tarifa.ultimoBloqueATodo ? 'todo el consumo se cobra a RD$ ' + fmt(b[3].precio, 2) + ' por kWh' : 'el excedente se cobra a RD$ ' + fmt(b[3].precio, 2)) + (estado.tarifa.itbisSobreUmbral ? ' y se agrega ITBIS.' : '.');
+  }
+
+  // ---------- aparatos ----------
+  function renderAparatos(c) {
+    const lista = $('#lista-aparatos');
+    if (!estado.aparatos.length) {
+      lista.innerHTML = '<div class="empty">Todavía no hay aparatos. Elige uno de la lista del formulario para empezar.</div>';
+      return;
+    }
+    // orden de registro (más estable para editar), con el consumo calculado
+    lista.innerHTML = estado.aparatos.map(function (ap) {
+      const horas = VC.horasDeUso(ap.rangos);
+      const detalle = [];
+      if (ap.cantidad > 1) detalle.push(ap.cantidad + ' unidades');
+      if (ap.ciclo < 1) detalle.push('ciclo ' + fmt(ap.ciclo * 100, 0) + ' %');
+      return '<div class="row' + (ap.id === editandoId ? ' editing' : '') + '" data-id="' + ap.id + '">' +
+        '<span class="name">' + esc(ap.nombre) + (detalle.length ? '<small>' + detalle.join(' · ') + '</small>' : '') + '</span>' +
+        '<span class="r mono"><span class="k">Potencia</span>' + fmt(ap.watts, 0) + ' W</span>' +
+        '<span class="sched"><span class="k">Horario</span>' + esc(VC.textoHorario(ap.rangos)) + '</span>' +
+        '<span class="r mono"><span class="k">Horas</span>' + fmt(horas, horas % 1 ? 2 : 0) + ' h</span>' +
+        '<span class="r mono"><span class="k">kWh/día</span><b>' + fmt(VC.energiaDiaria(ap), 2) + '</b></span>' +
+        '<span class="acts"><button class="btn small ghost" type="button" data-accion="editar">Editar</button><button class="btn small ghost danger" type="button" data-accion="quitar" aria-label="Quitar ' + esc(ap.nombre) + '">Quitar</button></span>' +
+        '</div>';
+    }).join('');
+  }
+
+  function llenarCatalogo() {
+    const sel = $('#f-catalogo');
+    sel.innerHTML = '<option value="">Elige un aparato común…</option>' +
+      D.CATALOGO.map(function (a, i) { return '<option value="' + i + '">' + esc(a.nombre) + ' · ' + a.watts + ' W</option>'; }).join('') +
+      '<option value="otro">Otro (lo escribo yo)</option>';
+  }
+
+
+  function agregarIntervalo(destino, inicio, fin, adicional) {
+    const fila = document.createElement('div');
+    fila.className = 'intervalo';
+    fila.innerHTML = '<label class="field">Desde<input type="time"></label>' +
+      '<label class="field">Hasta<input type="time"></label>' +
+      '<label class="check medianoche"><input type="checkbox"> Hasta medianoche</label>';
+    const [desde, hasta, medianoche] = fila.querySelectorAll('input');
+    desde.value = inicio;
+    hasta.value = fin === '24:00' ? '00:00' : fin;
+    medianoche.checked = fin === '24:00';
+    hasta.disabled = medianoche.checked;
+    fila.addEventListener('input', function () {
+      hasta.disabled = medianoche.checked;
+      actualizarVistaPrevia();
+    });
+    if (adicional) {
+      const quitar = document.createElement('button');
+      quitar.type = 'button';
+      quitar.className = 'btn small ghost';
+      quitar.textContent = 'Quitar intervalo';
+      quitar.addEventListener('click', function () {
+        fila.remove();
+        $('#agregar-intervalo').focus();
+        actualizarVistaPrevia();
+      });
+      fila.append(quitar);
+    }
+    destino.append(fila);
+    return desde;
+  }
+
+  function mostrarHorario() {
+    const todoDia = $('#f-todo-dia').checked;
+    $('#intervalos').hidden = todoDia;
+    $('#intervalos-extra').hidden = todoDia;
+    $('#agregar-intervalo').hidden = todoDia;
+  }
+
+  function cargarHorarioVisual(horario) {
+    const rangos = VC.parseHorario(horario);
+    const todoDia = rangos && VC.horasDeUso(rangos) === 24;
+    $('#f-todo-dia').checked = !!todoDia;
+    $('#primer-intervalo').innerHTML = '';
+    $('#intervalos-extra').innerHTML = '';
+    function hora(t) {
+      const minutos = Math.round(t * 60);
+      return String(Math.floor(minutos / 60)).padStart(2, '0') + ':' + String(minutos % 60).padStart(2, '0');
+    }
+    const pares = rangos && !todoDia ? rangos : [];
+    const [primero, ...extras] = pares.map(function (rango) { return rango.map(hora); });
+    agregarIntervalo($('#primer-intervalo'), ...(primero || ['', '']), false);
+    extras.forEach(function (par) { agregarIntervalo($('#intervalos-extra'), ...par, true); });
+    mostrarHorario();
+  }
+
+  function leerHorarioVisual() {
+    if ($('#f-todo-dia').checked) return '24 horas';
+    const horarios = Array.from(document.querySelectorAll('.intervalo'), function (fila) {
+      const [desde, hasta, medianoche] = fila.querySelectorAll('input');
+      const fin = medianoche.checked ? '24:00' : hasta.value;
+      if (!desde.value || !fin || desde.value === fin) return '';
+      return desde.value + '-' + fin;
+    });
+    return horarios.every(Boolean) ? horarios.join(', ') : '';
+  }
+
+  function leerFormulario() {
+    const nombre = $('#f-nombre').value.trim();
+    const watts = parseFloat($('#f-watts').value);
+    const cantidad = parseInt($('#f-cantidad').value, 10);
+    // El ciclo ya no se pregunta: se deduce del nombre (nevera 40 %, aire 70 %, etc.).
+    const ciclo = D.cicloAutomatico(nombre);
+    const horario = leerHorarioVisual();
+    $('#f-horario').value = horario;
+    const rangos = VC.parseHorario(horario);
+    const errores = [];
+    if (!nombre) errores.push('Escribe el nombre del aparato.');
+    if (!(watts > 0 && watts <= 20000)) errores.push('La potencia debe estar entre 1 y 20,000 W.');
+    if (!(cantidad >= 1 && cantidad <= 50)) errores.push('La cantidad debe estar entre 1 y 50.');
+    if (!rangos) errores.push('Completa cada intervalo con dos horas distintas, o activa Todo el día.');
+    return { datos: { nombre: nombre, watts: watts, cantidad: cantidad, ciclo: ciclo, horario: horario, rangos: rangos }, errores: errores };
+  }
+
+  function actualizarVistaPrevia() {
+    const r = leerFormulario();
+    const prev = $('#f-preview');
+    if (r.datos.watts > 0 && r.datos.rangos && r.datos.cantidad >= 1 && r.datos.ciclo > 0) {
+      const ap = Object.assign({}, r.datos, { ciclo: Math.min(1, r.datos.ciclo) });
+      const dia = VC.energiaDiaria(ap);
+      prev.innerHTML = 'Consumirá <b class="mono">' + fmt(dia, 2) + ' kWh</b> al día (' + fmt(VC.horasDeUso(ap.rangos), 2) + ' h de uso) y unos <b class="mono">' + fmt(dia * estado.periodo, 0) + ' kWh</b> en ' + estado.periodo + ' días.' +
+        (ap.ciclo < 1 ? '<br><span class="nota-ciclo">Ya se descontó que su motor o resistencia prende y apaga solo: trabaja cerca del ' + fmt(ap.ciclo * 100, 0) + ' % del tiempo.</span>' : '');
+    } else {
+      prev.textContent = 'Completa los datos para ver cuánto consumirá.';
+    }
+  }
+
+  function limpiarFormulario() {
+    editandoId = null;
+    $('#form-aparato').reset();
+    $('#f-cantidad').value = 1;
+    cargarHorarioVisual('');
+    $('#f-error').textContent = '';
+    $('#form-titulo').textContent = 'Agregar un aparato';
+    $('#f-guardar').textContent = 'Agregar aparato';
+    $('#f-cancelar').hidden = true;
+    document.querySelectorAll('#form-aparato .invalid').forEach(function (el) { el.classList.remove('invalid'); });
+    actualizarVistaPrevia();
+  }
+
+  function editarAparato(id) {
+    const ap = estado.aparatos.find(function (a) { return a.id === id; });
+    if (!ap) return;
+    editandoId = id;
+    $('#f-catalogo').value = '';
+    $('#f-nombre').value = ap.nombre;
+    $('#f-watts').value = ap.watts;
+    $('#f-cantidad').value = ap.cantidad;
+    cargarHorarioVisual(ap.horario);
+    abrirEditor();
+    $('#form-titulo').textContent = 'Editar: ' + ap.nombre;
+    $('#f-guardar').textContent = 'Guardar cambios';
+    $('#f-cancelar').hidden = false;
+    $('#f-error').textContent = '';
+    actualizarVistaPrevia();
+    renderAparatos();
+    $('#form-aparato').scrollIntoView({ block: 'nearest' });
+    $('#f-nombre').focus({ preventScroll: true });
+  }
+
+
+  // ---------- curva de potencia ----------
+  function puntosDeCambio(aparatos) {
+    const set = new Set([0, 24]);
+    aparatos.forEach(function (ap) { ap.rangos.forEach(function (r) { set.add(r[0]); set.add(r[1]); }); });
+    return Array.from(set).filter(function (t) { return t >= 0 && t <= 24; }).sort(function (a, b) { return a - b; });
+  }
+
+  function renderCurva(c) {
+    const cont = $('#grafico-curva');
+    if (!cont.clientWidth) return;
+    const ancho = Math.max(280, cont.clientWidth || 700);
+    const angosto = ancho < 520;
+    const alto = angosto ? 245 : 330;
+    const m = { l: 48, r: 12, t: 14, b: 40 };
+    const iw = ancho - m.l - m.r, ih = alto - m.t - m.b;
+    const ap = estado.aparatos;
+    const P = function (t) { return VC.potenciaEn(t, ap); };
+
+    const cortes = puntosDeCambio(ap);
+    const tramos = [];
+    for (let i = 0; i < cortes.length - 1; i++) {
+      const a = cortes[i], b = cortes[i + 1];
+      if (b - a > 1e-9) tramos.push({ a: a, b: b, p: P((a + b) / 2) });
+    }
+    const pMax = tramos.reduce(function (s, x) { return Math.max(s, x.p); }, 0);
+    const ejeY = escalaBonita(pMax * 1.08, 4);
+    const x = function (t) { return m.l + t / 24 * iw; };
+    const y = function (p) { return m.t + ih - p / ejeY.max * ih; };
+
+    cont.innerHTML = '';
+    const s = svg('svg', { viewBox: '0 0 ' + ancho + ' ' + alto, width: ancho, height: alto, role: 'img', 'aria-label': 'Curva de potencia del hogar durante el día. Energía total ' + fmt(c.diaria, 2) + ' kWh.' }, cont);
+
+    // cuadrícula y ejes
+    const g = svg('g', { class: 'grid' }, s);
+    const ejes = svg('g', { class: 'axis' }, s);
+    for (let v = 0; v <= ejeY.max + 1e-9; v += ejeY.paso) {
+      svg('line', { x1: m.l, x2: ancho - m.r, y1: y(v), y2: y(v) }, g);
+      const t = svg('text', { x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end' }, ejes);
+      t.textContent = fmt(v / 1000, ejeY.paso < 10 ? 3 : ejeY.paso < 100 ? 2 : 1);
+    }
+    const pasoH = angosto ? 6 : 3;
+    for (let h = 0; h <= 24; h += pasoH) {
+      const t = svg('text', { x: x(h), y: alto - m.b + 18, 'text-anchor': h === 0 ? 'start' : h === 24 ? 'end' : 'middle' }, ejes);
+      t.textContent = String(h).padStart(2, '0') + ':00';
+    }
+    const tituloX = svg('text', { x: m.l + iw / 2, y: alto - 4, 'text-anchor': 'middle', class: 'axis-title' }, s);
+    tituloX.textContent = 'Hora del día';
+
+    if (!tramos.length || pMax === 0) {
+      const t = svg('text', { x: m.l + iw / 2, y: m.t + ih / 2, 'text-anchor': 'middle', class: 'axis-title' }, s);
+      t.textContent = 'Agrega aparatos para ver la curva';
+      return;
+    }
+
+    // área y curva escalonada exacta
+    let d = 'M' + x(0) + ',' + y(tramos[0].p);
+    tramos.forEach(function (tr, i) {
+      if (i > 0) d += 'V' + y(tr.p);
+      d += 'H' + x(tr.b);
+    });
+    svg('path', { d: d + 'V' + y(0) + 'H' + x(0) + 'Z', class: 'area' }, s);
+
+    // trapecios
+    const n = N_VALORES[estado.nIndice];
+    if (estado.trapecios) {
+      const h = 24 / n;
+      const gt = svg('g', {}, s);
+      if (n <= 48) {
+        for (let i = 0; i < n; i++) {
+          const a = i * h, b = (i + 1) * h;
+          svg('polygon', { points: x(a) + ',' + y(0) + ' ' + x(a) + ',' + y(P(a)) + ' ' + x(b) + ',' + y(P(b)) + ' ' + x(b) + ',' + y(0), class: 'trap' }, gt);
+        }
+      } else {
+        let pts = '';
+        for (let i = 0; i <= n; i++) pts += x(i * h) + ',' + y(P(i * h)) + ' ';
+        svg('polyline', { points: pts.trim(), class: 'trap', style: 'fill:none' }, gt);
+      }
+      if (n <= 24) {
+        for (let i = 0; i <= n; i++) svg('circle', { cx: x(i * h), cy: y(P(i * h)), r: 4, class: 'trap-dot' }, gt);
+      }
+    }
+    svg('path', { d: d, class: 'curve' }, s);
+
+    // capa de interacción
+    const cruz = svg('line', { class: 'cross', y1: m.t, y2: m.t + ih, visibility: 'hidden' }, s);
+    const zona = svg('rect', { x: m.l, y: m.t, width: iw, height: ih, fill: 'transparent', style: 'cursor:crosshair' }, s);
+    const tip = document.createElement('div');
+    tip.className = 'tooltip';
+    tip.hidden = true;
+    cont.appendChild(tip);
+
+    function mover(ev) {
+      const caja = s.getBoundingClientRect();
+      const px = (ev.clientX - caja.left) * (ancho / caja.width);
+      let t = (px - m.l) / iw * 24;
+      t = Math.min(23.99, Math.max(0, Math.round(t * 12) / 12));
+      const p = P(t);
+      const activos = ap.filter(function (a) { return VC.encendido(t, a.rangos); })
+        .sort(function (a, b) { return VC.potenciaMedia(b) - VC.potenciaMedia(a); });
+      cruz.setAttribute('x1', x(t)); cruz.setAttribute('x2', x(t));
+      cruz.setAttribute('visibility', 'visible');
+      tip.innerHTML = '<b>' + VC.formatoHora(t) + '</b> · ' + fmt(p, 0) + ' W' +
+        '<ul>' + (activos.length ? activos.slice(0, 5).map(function (a) { return '<li>' + esc(a.nombre) + ' · ' + fmt(VC.potenciaMedia(a), 0) + ' W</li>'; }).join('') + (activos.length > 5 ? '<li>y ' + (activos.length - 5) + ' más</li>' : '') : '<li>Nada encendido</li>') + '</ul>';
+      tip.hidden = false;
+      const left = Math.min(Math.max(x(t) / ancho * caja.width, 80), caja.width - 80);
+      tip.style.left = left + 'px';
+      tip.style.top = Math.max(y(p) / alto * caja.height, 70) + 'px';
+    }
+    function salir() { cruz.setAttribute('visibility', 'hidden'); tip.hidden = true; }
+    zona.addEventListener('pointermove', mover);
+    zona.addEventListener('pointerdown', mover);
+    zona.addEventListener('pointerleave', salir);
+  }
+
+  function renderLecturaCurva(c) {
+    const n = N_VALORES[estado.nIndice];
+    const aprox = VC.energiaTrapecio(estado.aparatos, n);
+    const error = c.diaria > 0 ? (aprox - c.diaria) / c.diaria * 100 : 0;
+    const abs = Math.abs(error);
+    const h = 24 / n;
+    $('#r-exacta').innerHTML = fmt(c.diaria, 3) + ' <small>kWh</small>';
+    $('#r-trap-label').textContent = 'Regla del trapecio con n = ' + n;
+    $('#r-trap').innerHTML = fmt(aprox, 3) + ' <small>kWh</small>';
+    const tipo = abs < 1 ? 'good' : abs < 10 ? 'warn' : 'crit';
+    $('#r-error').innerHTML = '<span class="pill ' + tipo + '">Error ' + (error >= 0 ? '+' : '−') + fmt(abs, 1) + ' %</span>';
+    $('#n-slider').value = estado.nIndice;
+    $('#n-slider').setAttribute('aria-valuetext', n + ' trapecios');
+    $('#mostrar-trap').checked = estado.trapecios;
+    $('#leyenda-trap').hidden = !estado.trapecios;
+    const anchoTxt = h >= 1 ? fmt(h, h % 1 ? 1 : 0) + (h === 1 ? ' hora' : ' horas') : fmt(h * 60, 0) + ' minutos';
+    $('#r-explica').textContent = 'Cada trapecio cubre ' + anchoTxt + ' (h = 24/' + n + '). ' +
+      (abs < 1 ? 'Con esta n la aproximación ya coincide casi exactamente con el área real.' : 'Sube n para que los trapecios sigan mejor los cambios de la curva, sobre todo los aparatos que se usan pocos minutos.');
+  }
+
+  function renderBarras(c) {
+    const cont = $('#barras');
+    if (!c.porAparato.length) { cont.innerHTML = '<div class="empty">Sin aparatos registrados.</div>'; return; }
+    const max = c.porAparato[0].periodo || 1;
+    cont.innerHTML = c.porAparato.map(function (it, i) {
+      return '<div class="bar-row' + (i === 0 ? ' top' : '') + '" title="' + esc(it.ap.nombre) + ': ' + fmt(it.periodo, 1) + ' kWh, ' + fmt(it.parte * 100, 1) + ' % del consumo">' +
+        '<span class="n">' + esc(it.ap.nombre) + '</span>' +
+        '<span class="bar-track"><span class="bar-fill" style="display:block;width:' + (it.periodo / max * 100) + '%"></span></span>' +
+        '<span class="v">' + fmt(it.periodo, 1) + ' kWh · ' + rd(it.costo, 0) + '</span></div>';
+    }).join('');
+  }
+
+  // ---------- contador ----------
+  function renderMedidor(c) {
+    const cont = $('#grafico-medidor');
+    if (!cont.clientWidth) return;
+    const proy = c.proy;
+    const ancho = Math.max(280, cont.clientWidth || 600);
+    const angosto = ancho < 520;
+    const alto = angosto ? 230 : 280;
+    const m = { l: 52, r: angosto ? 58 : 70, t: 16, b: 40 };
+    const iw = ancho - m.l - m.r, ih = alto - m.t - m.b;
+    cont.innerHTML = '';
+    const s = svg('svg', { viewBox: '0 0 ' + ancho + ' ' + alto, width: ancho, height: alto, role: 'img', 'aria-label': proy ? 'Consumo acumulado según el contador, con proyección de ' + fmt(proy.total, 0) + ' kWh al final del período.' : 'Sin suficientes lecturas.' }, cont);
+
+    const hechos = $('#hechos-medidor');
+    if (!proy) {
+      const t = svg('text', { x: ancho / 2, y: alto / 2, 'text-anchor': 'middle', class: 'axis-title' }, s);
+      t.textContent = estado.lecturas.length ? 'Agrega una lectura de otro día para ver tu ritmo' : 'Agrega al menos dos lecturas de días distintos';
+      hechos.innerHTML = '';
+      return;
+    }
+
+    const umbrales = estado.tarifa.bloques.slice(0, 3).map(function (b) { return b.hasta; });
+    const siguiente = umbrales.find(function (u) { return u > proy.total; });
+    const ejeY = escalaBonita(Math.max(proy.total * 1.08, siguiente ? siguiente * 1.04 : 0), 4);
+    const x = function (d) { return m.l + d / proy.periodo * iw; };
+    const y = function (v) { return m.t + ih - v / ejeY.max * ih; };
+
+    const g = svg('g', { class: 'grid' }, s);
+    const ejes = svg('g', { class: 'axis' }, s);
+    for (let v = 0; v <= ejeY.max + 1e-9; v += ejeY.paso) {
+      svg('line', { x1: m.l, x2: m.l + iw, y1: y(v), y2: y(v) }, g);
+      const t = svg('text', { x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end' }, ejes);
+      t.textContent = fmt(v, 0);
+    }
+    const pasoD = proy.periodo <= 31 ? (angosto ? 10 : 5) : 10;
+    for (let d = 0; d <= proy.periodo; d += pasoD) {
+      const t = svg('text', { x: x(d), y: alto - m.b + 18, 'text-anchor': d === 0 ? 'start' : 'middle' }, ejes);
+      t.textContent = d;
+    }
+    const tx = svg('text', { x: m.l + iw / 2, y: alto - 4, 'text-anchor': 'middle', class: 'axis-title' }, s);
+    tx.textContent = 'Días desde la primera lectura';
+    const ty = svg('text', { x: 4, y: m.t - 4, class: 'axis-title' }, s);
+    ty.textContent = 'kWh';
+
+    umbrales.forEach(function (u) {
+      if (u > ejeY.max) return;
+      svg('line', { x1: m.l, x2: m.l + iw, y1: y(u), y2: y(u), class: 'threshold' }, s);
+      const t = svg('text', { x: m.l + 6, y: y(u) - 5, class: 'threshold-label' }, s);
+      t.textContent = 'límite ' + u + ' kWh';
+    });
+
+    const pts = proy.puntos;
+    svg('polyline', { points: pts.map(function (p) { return x(p.dia) + ',' + y(p.acumulado); }).join(' '), class: 'real' }, s);
+    svg('line', { x1: x(proy.ultimo.dia), y1: y(proy.ultimo.acumulado), x2: x(proy.periodo), y2: y(proy.total), class: 'proj' }, s);
+    pts.forEach(function (p) { svg('circle', { cx: x(p.dia), cy: y(p.acumulado), r: 4.5, class: 'dot' }, s); });
+    svg('circle', { cx: x(proy.periodo), cy: y(proy.total), r: 5, class: 'dot-end' }, s);
+    const fin = svg('text', { x: x(proy.periodo) + 8, y: y(proy.total) + 4, class: 'end-label' }, s);
+    fin.textContent = fmt(proy.total, 0);
+
+    // interacción: punto más cercano
+    const tip = document.createElement('div');
+    tip.className = 'tooltip';
+    tip.hidden = true;
+    cont.appendChild(tip);
+    const objetivos = pts.map(function (p) { return { dia: p.dia, v: p.acumulado, txt: '<b>' + fechaCorta(p.fecha) + '</b><ul><li>Contador: ' + fmt(p.valor, 1) + ' kWh</li><li>Acumulado: ' + fmt(p.acumulado, 1) + ' kWh</li></ul>' }; });
+    objetivos.push({ dia: proy.periodo, v: proy.total, txt: '<b>Cierre del período</b><ul><li>Proyección: ' + fmt(proy.total, 1) + ' kWh</li><li>' + fechaCorta(sumarDias(pts[0].fecha, proy.periodo)) + '</li></ul>' });
+    const zona = svg('rect', { x: m.l, y: m.t, width: iw + 10, height: ih, fill: 'transparent' }, s);
+    function mover(ev) {
+      const caja = s.getBoundingClientRect();
+      const px = (ev.clientX - caja.left) * (ancho / caja.width);
+      const dia = (px - m.l) / iw * proy.periodo;
+      let mejor = objetivos[0];
+      objetivos.forEach(function (o) { if (Math.abs(o.dia - dia) < Math.abs(mejor.dia - dia)) mejor = o; });
+      tip.innerHTML = mejor.txt;
+      tip.hidden = false;
+      tip.style.left = Math.min(Math.max(x(mejor.dia) / ancho * caja.width, 80), caja.width - 80) + 'px';
+      tip.style.top = Math.max(y(mejor.v) / alto * caja.height, 70) + 'px';
+    }
+    zona.addEventListener('pointermove', mover);
+    zona.addEventListener('pointerdown', mover);
+    zona.addEventListener('pointerleave', function () { tip.hidden = true; });
+
+    // datos clave
+    const facProy = VC.factura(proy.total, estado.tarifa);
+    let cambio = 'No cambiarías de bloque en este período.';
+    const proximo = umbrales.find(function (u) { return u > proy.ultimo.acumulado; });
+    if (proximo) {
+      const dia = VC.diaQueAlcanza(proy, proximo);
+      if (dia !== null) cambio = 'Llegarías a ' + proximo + ' kWh alrededor del ' + fechaCorta(sumarDias(pts[0].fecha, dia));
+    }
+    const cobertura = proy.ritmo > 0 ? c.diaria / proy.ritmo * 100 : 0;
+    hechos.innerHTML =
+      '<div class="fact"><span class="label">Ritmo según lecturas</span><span class="val">' + fmt(proy.ritmo, 2) + ' kWh/día</span><span class="sub">Consumo de aparatos respecto al ritmo: ' + fmt(cobertura, 0) + ' %</span></div>' +
+      '<div class="fact"><span class="label">Proyección a ' + proy.periodo + ' días</span><span class="val">' + fmt(proy.total, 0) + ' kWh</span><span class="sub">Factura ≈ ' + rd(facProy.total, 0) + '</span></div>' +
+      '<div class="fact"><span class="label">Próximo bloque</span><span class="val" style="font-size:.95rem;font-family:var(--font-body)">' + cambio + '</span></div>';
+  }
+
+  function renderLecturas() {
+    const cont = $('#lista-lecturas');
+    const orden = estado.lecturas.slice().sort(function (a, b) { return a.fecha < b.fecha ? -1 : 1; });
+    if (!orden.length) { cont.innerHTML = '<div class="empty">Sin lecturas todavía.</div>'; return; }
+    const filas = orden.map(function (l, i) {
+      const ant = orden[i - 1];
+      let dif = '';
+      if (ant) {
+        const dias = VC.diasEntre(ant.fecha, l.fecha);
+        dif = '+' + fmt((l.valor - ant.valor) / Math.max(1, dias), 1) + (dias > 1 ? ' /día' : '');
+      }
+      return '<div class="reading"><span>' + fechaCorta(l.fecha) + ' ' + l.fecha.slice(0, 4) + '</span><span class="mono">' + fmt(l.valor, 1) + '</span><span class="d">' + dif + '</span>' +
+        '<button class="btn small ghost danger" type="button" data-fecha="' + l.fecha + '" aria-label="Borrar lectura del ' + l.fecha + '">Borrar</button></div>';
+    }).reverse();
+    cont.innerHTML = filas.join('');
+  }
+
+  // ---------- ahorro ----------
+  function renderAhorro(c) {
+    const cont = $('#sliders');
+    const items = c.porAparato.filter(function (it) { return VC.horasDeUso(it.ap.rangos) > 0; });
+    const aire = estado.aparatos.find(function (a) { return /aire/i.test(a.nombre); });
+    $('#btn-aire').hidden = !aire || VC.horasDeUso(aire.rangos) < 2;
+
+    if (!items.length) {
+      cont.innerHTML = '<div class="empty">Agrega aparatos para simular.</div>';
+      $('#resultado-ahorro').innerHTML = '';
+      return;
+    }
+    // limpiar reducciones de aparatos que ya no existen o exceden sus horas
+    Object.keys(estado.reducciones).forEach(function (id) {
+      const ap = estado.aparatos.find(function (a) { return a.id === id; });
+      if (!ap) delete estado.reducciones[id];
+      else estado.reducciones[id] = Math.min(estado.reducciones[id], VC.horasDeUso(ap.rangos));
+    });
+
+    // se reconstruye solo si cambió la lista de aparatos (para no perder el foco al arrastrar)
+    const firma = items.map(function (it) { return it.ap.id + ':' + VC.horasDeUso(it.ap.rangos) + ':' + it.ap.nombre; }).join('|');
+    if (cont.dataset.firma !== firma) {
+      cont.dataset.firma = firma;
+      cont.innerHTML = items.map(function (it) {
+        const horas = VC.horasDeUso(it.ap.rangos);
+        const paso = horas <= 1 ? 0.0833 : horas <= 4 ? 0.25 : 0.5;
+        return '<div class="slider-row" data-id="' + it.ap.id + '">' +
+          '<div class="top"><b>' + esc(it.ap.nombre) + '</b><span data-salida></span></div>' +
+          '<input type="range" id="sim-' + it.ap.id + '" min="0" max="' + horas + '" step="' + paso + '" aria-label="Horas menos al día para ' + esc(it.ap.nombre) + '">' +
+          '</div>';
+      }).join('');
+    }
+    cont.querySelectorAll('.slider-row').forEach(function (fila) {
+      const id = fila.dataset.id;
+      const ap = estado.aparatos.find(function (a) { return a.id === id; });
+      const r = estado.reducciones[id] || 0;
+      const input = fila.querySelector('input');
+      if (document.activeElement !== input) input.value = r;
+      const horas = VC.horasDeUso(ap.rangos);
+      const ahorroDia = VC.potenciaMedia(ap) * r / 1000;
+      fila.querySelector('[data-salida]').textContent = r > 0
+        ? '−' + textoHoras(r) + ' · ahorra ' + fmt(ahorroDia, 2) + ' kWh/día'
+        : 'usa ' + textoHoras(horas) + ' al día';
+    });
+
+    const nuevoDia = VC.energiaConReduccion(estado.aparatos, estado.reducciones);
+    const nuevoPeriodo = nuevoDia * estado.periodo;
+    const facNueva = VC.factura(nuevoPeriodo, estado.tarifa);
+    const ahorro = c.factura.total - facNueva.total;
+    let bloqueTxt = '';
+    if (facNueva.bloque < c.factura.bloque) bloqueTxt = '<p>Bajarías del bloque ' + NOMBRES_BLOQUE[c.factura.bloque] + ' al de ' + NOMBRES_BLOQUE[facNueva.bloque] + '.</p>';
+    $('#resultado-ahorro').innerHTML =
+      '<h3>Resultado</h3>' +
+      '<div class="compare">' +
+      '<div><span class="k">Ahora</span><span class="v">' + fmt(c.periodoKwh, 0) + ' kWh</span><span class="mono" style="font-size:.9rem">' + rd(c.factura.total, 0) + '</span></div>' +
+      '<div><span class="k">Con los cambios</span><span class="v">' + fmt(nuevoPeriodo, 0) + ' kWh</span><span class="mono" style="font-size:.9rem">' + rd(facNueva.total, 0) + '</span></div>' +
+      '</div>' +
+      '<div class="savings"><span class="k" style="font-size:.85rem;font-weight:600;color:var(--ink-2)">Ahorro en ' + estado.periodo + ' días</span><span class="v">' + rd(ahorro, 0) + '</span><span class="sub">≈ ' + rd(ahorro * 365 / estado.periodo, 0) + ' al año · ' + fmt(c.periodoKwh - nuevoPeriodo, 0) + ' kWh menos</span></div>' +
+      (ahorro === 0 ? '<p style="color:var(--muted)">Mueve alguna barra para ver el ahorro.</p>' : bloqueTxt);
+  }
+
+  function textoHoras(h) {
+    if (h < 1) return fmt(h * 60, 0) + ' min';
+    const ent = Math.floor(h), min = Math.round((h - ent) * 60);
+    return ent + ' h' + (min ? ' ' + min + ' min' : '');
+  }
+
+  // ---------- tarifa ----------
+  function renderTarifa() {
+    const t = estado.tarifa;
+    for (let i = 0; i < 4; i++) { const el = $('#t-' + i); if (document.activeElement !== el) el.value = t.bloques[i].precio; }
+    if (document.activeElement !== $('#t-fijo')) $('#t-fijo').value = t.cargoFijo;
+    if (document.activeElement !== $('#t-periodo')) $('#t-periodo').value = estado.periodo;
+    $('#t-todo').checked = t.ultimoBloqueATodo;
+    $('#t-itbis').checked = t.itbisSobreUmbral;
+  }
+
+  // ---------- render general ----------
+  let ultimoCalculo = null;
+  function renderTodo() {
+    const c = calcular();
+    ultimoCalculo = c;
+    $('#aviso-ejemplo').hidden = !estado.ejemplo;
+    $('#origen-lecturas').hidden = !estado.lecturasEjemplo;
+    $('#btn-quitar-todos').disabled = !estado.aparatos.length;
+    renderResumen(c);
+    renderAparatos(c);
+    renderCurva(c);
+    renderLecturaCurva(c);
+    renderBarras(c);
+    renderMedidor(c);
+    renderLecturas();
+    renderAhorro(c);
+    renderTarifa();
+    guardar();
+  }
+
+  // ---------- eventos ----------
+  function iniciar() {
+
+    llenarCatalogo();
+
+    // Muestra una sección. Funciona con clics aunque el archivo se abra desde
+    // WhatsApp o la carpeta de descargas del celular, donde cambiar location.hash puede fallar.
+    function leerHash() {
+      try { return location.hash.slice(1); } catch (e) { return ''; }
+    }
+    function irA(id) {
+      navegar(true, id);
+      try { history.replaceState(null, '', '#' + id); } catch (e) { /* sin historial disponible */ }
+    }
+    document.addEventListener('click', function (e) {
+      const enlace = e.target.closest('a[href^="#"]');
+      if (!enlace) return;
+      const id = enlace.getAttribute('href').slice(1);
+      if (!id || !document.getElementById(id)) return;
+      e.preventDefault();
+      irA(id);
+    });
+
+    function navegar(enfocar, pedido) {
+      const hash = pedido !== undefined ? pedido : leerHash();
+      const destino = hash === 'curva' ? 'resumen' : hash;
+      const secciones = Array.from(document.querySelectorAll('main > section'));
+      const activa = secciones.find(function (s) { return s.id === destino; }) || secciones[0];
+      secciones.forEach(function (s) { s.hidden = s !== activa; });
+      document.querySelectorAll('.nav a').forEach(function (a) {
+        if (a.getAttribute('href') === '#' + activa.id) a.setAttribute('aria-current', 'page');
+        else a.removeAttribute('aria-current');
+      });
+      if (hash === 'curva') $('#curva').open = true;
+      if (enfocar) {
+        window.scrollTo(0, 0);
+        const titulo = activa.querySelector('h1, h2');
+        titulo.tabIndex = -1;
+        titulo.focus({ preventScroll: true });
+      }
+      if (ultimoCalculo) {
+        if (activa.id === 'resumen') renderCurva(ultimoCalculo);
+        if (activa.id === 'medidor') renderMedidor(ultimoCalculo);
+      }
+    }
+    window.addEventListener('hashchange', function () { navegar(true); });
+    navegar(false);
+
+
+    $('#f-catalogo').addEventListener('change', function (e) {
+      const v = e.target.value;
+      if (v === '' ) return;
+      if (v === 'otro') { $('#f-nombre').value = ''; $('#f-watts').value = ''; cargarHorarioVisual(''); $('#f-nombre').focus(); actualizarVistaPrevia(); return; }
+      const a = D.CATALOGO[+v];
+      $('#f-nombre').value = a.nombre;
+      $('#f-watts').value = a.watts;
+      cargarHorarioVisual(a.horario);
+      $('#f-error').textContent = '';
+      actualizarVistaPrevia();
+    });
+
+    ['#f-nombre', '#f-watts', '#f-cantidad', '#f-horario'].forEach(function (s) {
+      $(s).addEventListener('input', actualizarVistaPrevia);
+    });
+
+    $('#form-aparato').addEventListener('submit', function (e) {
+      e.preventDefault();
+      const r = leerFormulario();
+      $('#f-watts').classList.toggle('invalid', !(r.datos.watts > 0));
+      $('#f-horario').classList.toggle('invalid', !r.datos.rangos);
+      $('#f-nombre').classList.toggle('invalid', !r.datos.nombre);
+      if (r.errores.length) { $('#f-error').textContent = r.errores[0]; return; }
+      const datos = Object.assign({}, r.datos, { ciclo: Math.min(1, r.datos.ciclo) });
+      if (editandoId) {
+        const i = estado.aparatos.findIndex(function (a) { return a.id === editandoId; });
+        if (i >= 0) estado.aparatos[i] = aparatoDesde(Object.assign({ id: editandoId }, datos));
+        anunciar('Cambios guardados en ' + datos.nombre + '.');
+      } else {
+        estado.aparatos.push(aparatoDesde(datos));
+        anunciar(datos.nombre + ' agregado.');
+      }
+      marcarEditado();
+      cerrarEditor();
+      limpiarFormulario();
+      renderTodo();
+      $('#btn-agregar').focus();
+    });
+
+
+    $('#f-cancelar').addEventListener('click', cerrarEditor);
+    $('#cerrar-editor').addEventListener('click', cerrarEditor);
+    $('#editor').addEventListener('close', alCerrarEditor);
+    $('#btn-agregar').addEventListener('click', function () {
+      limpiarFormulario();
+      abrirEditor();
+      $('#f-catalogo').focus();
+    });
+    // Botones para todos los aparatos: hay que pulsar dos veces para confirmar,
+    // porque borran o reemplazan la lista completa.
+    function botonConConfirmacion(boton, textoConfirmar, accion) {
+      const textoNormal = boton.textContent;
+      let espera = null;
+      boton.addEventListener('click', function () {
+        if (!espera) {
+          boton.textContent = textoConfirmar;
+          boton.classList.add('confirmando');
+          espera = setTimeout(function () { boton.textContent = textoNormal; boton.classList.remove('confirmando'); espera = null; }, 4000);
+          return;
+        }
+        clearTimeout(espera); espera = null;
+        boton.textContent = textoNormal; boton.classList.remove('confirmando');
+        accion();
+      });
+    }
+    botonConConfirmacion($('#btn-quitar-todos'), '¿Seguro? Pulsa otra vez', function () {
+      estado.aparatos = [];
+      estado.reducciones = {};
+      marcarEditado();
+      renderTodo();
+      anunciar('Se quitaron todos los aparatos.');
+      $('#btn-agregar').focus();
+    });
+    botonConConfirmacion($('#btn-restaurar-aparatos'), 'Reemplazar mi lista: pulsa otra vez', function () {
+      estado.aparatos = D.EJEMPLO_APARATOS.map(aparatoDesde);
+      estado.reducciones = {};
+      renderTodo();
+      anunciar('Se restauraron los 12 aparatos del ejemplo.');
+    });
+
+    $('#agregar-intervalo').addEventListener('click', function () {
+      agregarIntervalo($('#intervalos-extra'), '', '', true).focus();
+      actualizarVistaPrevia();
+    });
+    $('#f-todo-dia').addEventListener('input', function () {
+      mostrarHorario();
+      actualizarVistaPrevia();
+    });
+
+
+    $('#lista-aparatos').addEventListener('click', function (e) {
+      const btn = e.target.closest('button[data-accion]');
+      if (!btn) return;
+      const id = btn.closest('.row').dataset.id;
+      if (btn.dataset.accion === 'editar') editarAparato(id);
+      else {
+        const ap = estado.aparatos.find(function (a) { return a.id === id; });
+        estado.aparatos = estado.aparatos.filter(function (a) { return a.id !== id; });
+        delete estado.reducciones[id];
+        if (editandoId === id) limpiarFormulario();
+        marcarEditado();
+        anunciar((ap ? ap.nombre : 'Aparato') + ' quitado.');
+        renderTodo();
+      }
+    });
+
+    $('#n-slider').addEventListener('input', function (e) {
+      estado.nIndice = +e.target.value;
+      renderCurva(ultimoCalculo);
+      renderLecturaCurva(ultimoCalculo);
+      guardar();
+    });
+    $('#mostrar-trap').addEventListener('change', function (e) {
+      estado.trapecios = e.target.checked;
+      renderCurva(ultimoCalculo);
+      renderLecturaCurva(ultimoCalculo);
+      guardar();
+    });
+
+    // lecturas
+    $('#l-fecha').value = hoyISO();
+    $('#form-lectura').addEventListener('submit', function (e) {
+      e.preventDefault();
+      const fecha = $('#l-fecha').value;
+      const valor = parseFloat($('#l-valor').value);
+      const err = $('#l-error');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) { err.textContent = 'Elige la fecha de la lectura.'; return; }
+      if (!(valor >= 0)) { err.textContent = 'Escribe el número que marca el contador.'; return; }
+      const otras = estado.lecturas.filter(function (l) { return l.fecha !== fecha; });
+      const antes = otras.filter(function (l) { return l.fecha < fecha; }).sort(function (a, b) { return a.fecha < b.fecha ? -1 : 1; }).pop();
+      const despues = otras.filter(function (l) { return l.fecha > fecha; }).sort(function (a, b) { return a.fecha < b.fecha ? -1 : 1; })[0];
+      if (antes && valor < antes.valor) { err.textContent = 'La lectura no puede ser menor que la del ' + fechaCorta(antes.fecha) + ' (' + fmt(antes.valor, 1) + '). El contador solo sube.'; return; }
+      if (despues && valor > despues.valor) { err.textContent = 'La lectura no puede ser mayor que la del ' + fechaCorta(despues.fecha) + ' (' + fmt(despues.valor, 1) + ').'; return; }
+      err.textContent = '';
+      otras.push({ fecha: fecha, valor: valor });
+      estado.lecturas = otras;
+      actualizarOrigenLecturas();
+      marcarEditado();
+      $('#l-valor').value = '';
+      $('#l-fecha').value = sumarDias(fecha, 1);
+      anunciar('Lectura guardada.');
+      renderTodo();
+    });
+    $('#lista-lecturas').addEventListener('click', function (e) {
+      const btn = e.target.closest('button[data-fecha]');
+      if (!btn) return;
+      estado.lecturas = estado.lecturas.filter(function (l) { return l.fecha !== btn.dataset.fecha; });
+      actualizarOrigenLecturas();
+      marcarEditado();
+      renderTodo();
+    });
+
+    // simulador
+    $('#sliders').addEventListener('input', function (e) {
+      if (e.target.type !== 'range') return;
+      const id = e.target.closest('.slider-row').dataset.id;
+      estado.reducciones[id] = +e.target.value;
+      renderAhorro(ultimoCalculo);
+      guardar();
+    });
+    $('#btn-reiniciar-sim').addEventListener('click', function () {
+      estado.reducciones = {};
+      document.querySelectorAll('#sliders input').forEach(function (i) { i.value = 0; });
+      renderAhorro(ultimoCalculo);
+      guardar();
+    });
+    $('#btn-aire').addEventListener('click', function () {
+      estado.reducciones = {};
+      estado.aparatos.filter(function (a) { return /aire/i.test(a.nombre); }).forEach(function (a) {
+        estado.reducciones[a.id] = Math.min(2, VC.horasDeUso(a.rangos));
+      });
+      document.querySelectorAll('#sliders input').forEach(function (i) { i.value = estado.reducciones[i.closest('.slider-row').dataset.id] || 0; });
+      renderAhorro(ultimoCalculo);
+      guardar();
+    });
+
+    // tarifa
+    function leerTarifa() {
+      for (let i = 0; i < 4; i++) {
+        const v = parseFloat($('#t-' + i).value);
+        if (v >= 0) estado.tarifa.bloques[i].precio = v;
+      }
+      const fijo = parseFloat($('#t-fijo').value);
+      if (fijo >= 0) estado.tarifa.cargoFijo = fijo;
+      const per = parseInt($('#t-periodo').value, 10);
+      if (per >= 1 && per <= 62) estado.periodo = per;
+      estado.tarifa.ultimoBloqueATodo = $('#t-todo').checked;
+      estado.tarifa.itbisSobreUmbral = $('#t-itbis').checked;
+      renderTodo();
+    }
+    ['#t-0', '#t-1', '#t-2', '#t-3', '#t-fijo', '#t-periodo'].forEach(function (s) { $(s).addEventListener('input', leerTarifa); });
+    ['#t-todo', '#t-itbis'].forEach(function (s) { $(s).addEventListener('change', leerTarifa); });
+    $('#btn-tarifa-ref').addEventListener('click', function () {
+      estado.tarifa = clonar(D.TARIFA);
+      estado.periodo = 30;
+      renderTodo();
+      anunciar('Tarifa de referencia restaurada.');
+    });
+
+    // aviso de ejemplo
+    let confirmando = null;
+    $('#btn-limpiar').addEventListener('click', function (e) {
+      const btn = e.currentTarget;
+      if (!confirmando) {
+        btn.textContent = 'Sí, borrar el ejemplo';
+        btn.classList.add('danger');
+        confirmando = setTimeout(function () { btn.textContent = 'Empezar desde cero'; btn.classList.remove('danger'); confirmando = null; }, 4000);
+        return;
+      }
+      clearTimeout(confirmando); confirmando = null;
+      btn.textContent = 'Empezar desde cero'; btn.classList.remove('danger');
+      estado.aparatos = [];
+      estado.lecturas = [];
+      estado.lecturasEjemplo = false;
+      estado.reducciones = {};
+      estado.ejemplo = false;
+      limpiarFormulario();
+      renderTodo();
+      irA('aparatos');
+    });
+    $('#btn-ocultar-aviso').addEventListener('click', function () {
+      estado.ejemplo = false;
+      renderTodo();
+    });
+
+
+    // redibujar gráficos al cambiar el tamaño
+    let anchoPrevio = 0, espera = null;
+    const ro = new ResizeObserver(function () {
+      const w = $('#grafico-curva').clientWidth - $('#grafico-medidor').clientWidth;
+      if (Math.abs(w - anchoPrevio) < 4) return;
+      anchoPrevio = w;
+      clearTimeout(espera);
+      espera = setTimeout(function () { renderCurva(ultimoCalculo); renderMedidor(ultimoCalculo); }, 60);
+    });
+    ro.observe($('#grafico-curva'));
+    ro.observe($('#grafico-medidor'));
+
+    limpiarFormulario();
+    renderTodo();
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar);
+  else iniciar();
+})();
+
+</script>
+</body>
+</html>
