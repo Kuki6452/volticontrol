@@ -58,6 +58,23 @@
 
   function anunciar(texto) { $('#anuncio').textContent = texto; }
 
+  // ---------- aviso flotante con "Deshacer" ----------
+  let temporizadorAviso = null;
+  let accionDeshacer = null;
+  function ocultarAviso() {
+    clearTimeout(temporizadorAviso);
+    $('#toast').hidden = true;
+    accionDeshacer = null;
+  }
+  function mostrarAviso(texto, deshacer) {
+    $('#toast-texto').textContent = texto;
+    accionDeshacer = deshacer || null;
+    $('#toast-deshacer').hidden = !deshacer;
+    $('#toast').hidden = false;
+    clearTimeout(temporizadorAviso);
+    temporizadorAviso = setTimeout(ocultarAviso, deshacer ? 7000 : 3500);
+  }
+
   // ---------- estado ----------
   function aparatoDesde(o) {
     return {
@@ -85,6 +102,15 @@
     };
   }
 
+  function esLecturaEjemplo(l) { return D.VALORES_LECTURAS_EJEMPLO.indexOf(l.valor) >= 0; }
+
+  // Si las lecturas guardadas son exactamente las del ejemplo, se renuevan sus
+  // fechas para que terminen ayer (si no, la proyección hablaría del pasado).
+  function refrescarLecturasEjemplo(lecturas) {
+    if (lecturas.length === D.VALORES_LECTURAS_EJEMPLO.length && lecturas.every(esLecturaEjemplo)) return clonar(D.EJEMPLO_LECTURAS);
+    return lecturas;
+  }
+
   function cargar() {
     const base = estadoInicial();
     try {
@@ -93,7 +119,7 @@
       const s = JSON.parse(crudo);
       return {
         aparatos: Array.isArray(s.aparatos) ? s.aparatos.map(aparatoDesde).filter(function (a) { return a.rangos; }) : base.aparatos,
-        lecturas: Array.isArray(s.lecturas) ? s.lecturas.filter(function (l) { return /^\d{4}-\d{2}-\d{2}$/.test(l.fecha) && isFinite(l.valor); }) : base.lecturas,
+        lecturas: Array.isArray(s.lecturas) ? refrescarLecturasEjemplo(s.lecturas.filter(function (l) { return /^\d{4}-\d{2}-\d{2}$/.test(l.fecha) && isFinite(l.valor); })) : base.lecturas,
         tarifa: s.tarifa && Array.isArray(s.tarifa.bloques) && s.tarifa.bloques.length === 4 ? Object.assign(clonar(D.TARIFA), s.tarifa) : base.tarifa,
         periodo: s.periodo > 0 ? s.periodo : 30,
         nIndice: s.nIndice >= 0 && s.nIndice < N_VALORES.length ? s.nIndice : 3,
@@ -124,9 +150,23 @@
   // ---------- cálculo central ----------
 
   function actualizarOrigenLecturas() {
-    estado.lecturasEjemplo = estado.lecturas.some(function (l) {
-      return D.EJEMPLO_LECTURAS.some(function (e) { return e.fecha === l.fecha && e.valor === l.valor; });
-    });
+    estado.lecturasEjemplo = estado.lecturas.some(esLecturaEjemplo);
+  }
+
+  // Aplica un cambio y ofrece deshacerlo durante unos segundos.
+  function deshacerA(antes) {
+    return function () {
+      estado = antes;
+      limpiarFormulario();
+      renderTodo();
+      anunciar('Cambio deshecho.');
+    };
+  }
+  function conDeshacer(texto, cambio) {
+    const antes = clonar(estado);
+    cambio();
+    renderTodo();
+    mostrarAviso(texto, deshacerA(antes));
   }
 
   function calcular() {
@@ -201,10 +241,11 @@
     const f = c.factura;
     const top = c.porAparato[0];
 
+    // La factura va primero y más grande: es la cifra que más le importa a la gente.
     $('#stats').innerHTML =
-      '<div class="stat"><span class="label">Consumo diario</span><span class="value"><span id="n-diaria">' + fmt(c.diaria, 2) + '</span><small>kWh</small></span><span class="sub">Área bajo la curva de 0 a 24 h</span></div>' +
+      '<div class="stat"><span class="label">Factura estimada · ' + estado.periodo + ' días</span><span class="value" id="n-factura">' + rd(f.total, 0) + '</span><span class="sub">≈ ' + rd(f.precioMedio) + ' por kWh en promedio</span></div>' +
       '<div class="stat"><span class="label">Consumo · ' + estado.periodo + ' días</span><span class="value"><span id="n-periodo">' + fmt(c.periodoKwh, 0) + '</span><small>kWh</small></span><span class="sub">' + pillBloque(f.bloque) + '</span></div>' +
-      '<div class="stat"><span class="label">Factura estimada</span><span class="value" id="n-factura">' + rd(f.total, 0) + '</span><span class="sub">≈ ' + rd(f.precioMedio) + ' por kWh en promedio</span></div>';
+      '<div class="stat"><span class="label">Consumo diario</span><span class="value"><span id="n-diaria">' + fmt(c.diaria, 2) + '</span><small>kWh</small></span><span class="sub">Área bajo la curva de 0 a 24 h</span></div>';
     animarNumero('diaria', $('#n-diaria'), c.diaria, function (v) { return fmt(v, 2); });
     animarNumero('periodo', $('#n-periodo'), c.periodoKwh, function (v) { return fmt(v, 0); });
     animarNumero('factura', $('#n-factura'), f.total, function (v) { return rd(v, 0); });
@@ -250,27 +291,52 @@
   }
 
   // ---------- aparatos ----------
+  // Aparatos comunes que se ofrecen como atajo cuando la lista está vacía.
+  const ATAJOS = ['Nevera', 'Aire acondicionado 12,000 BTU', 'Abanico de techo', 'Televisor LED 43"', 'Bombillo LED', 'Router Wi‑Fi'];
+
   function renderAparatos(c) {
+    c = c || ultimoCalculo || calcular();
     const lista = $('#lista-aparatos');
+    $('#cabecera-costo').textContent = 'Costo · ' + estado.periodo + ' días';
     if (!estado.aparatos.length) {
-      lista.innerHTML = '<div class="empty">Todavía no hay aparatos. Elige uno de la lista del formulario para empezar.</div>';
+      const botones = ATAJOS.map(function (nombre) {
+        const i = D.CATALOGO.findIndex(function (a) { return a.nombre === nombre; });
+        return i < 0 ? '' : '<button class="btn small" type="button" data-catalogo="' + i + '">+ ' + esc(nombre.replace(/ \d.*$/, '')) + '</button>';
+      }).join('');
+      lista.innerHTML = '<div class="vacio"><p>Todavía no hay aparatos. Empieza con uno común:</p>' +
+        '<div class="atajos">' + botones + '<button class="btn small ghost" type="button" data-catalogo="otro">Otro aparato</button></div></div>';
       return;
     }
-    // orden de registro (más estable para editar), con el consumo calculado
-    lista.innerHTML = estado.aparatos.map(function (ap) {
+    // Del que más cuesta al que menos (el costo es su parte de la factura).
+    const max = c.porAparato.length ? c.porAparato[0].costo : 0;
+    lista.innerHTML = c.porAparato.map(function (it) {
+      const ap = it.ap;
       const horas = VC.horasDeUso(ap.rangos);
-      const detalle = [];
+      const detalle = [fmt(ap.watts, 0) + ' W'];
       if (ap.cantidad > 1) detalle.push(ap.cantidad + ' unidades');
       if (ap.ciclo < 1) detalle.push('ciclo ' + fmt(ap.ciclo * 100, 0) + ' %');
       return '<div class="row' + (ap.id === editandoId ? ' editing' : '') + '" data-id="' + ap.id + '">' +
-        '<span class="name">' + esc(ap.nombre) + (detalle.length ? '<small>' + detalle.join(' · ') + '</small>' : '') + '</span>' +
-        '<span class="r mono"><span class="k">Potencia</span>' + fmt(ap.watts, 0) + ' W</span>' +
-        '<span class="sched"><span class="k">Horario</span>' + esc(VC.textoHorario(ap.rangos)) + '</span>' +
-        '<span class="r mono"><span class="k">Horas</span>' + fmt(horas, horas % 1 ? 2 : 0) + ' h</span>' +
-        '<span class="r mono"><span class="k">kWh/día</span><b>' + fmt(VC.energiaDiaria(ap), 2) + '</b></span>' +
-        '<span class="acts"><button class="btn small ghost" type="button" data-accion="editar">Editar</button><button class="btn small ghost danger" type="button" data-accion="quitar" aria-label="Quitar ' + esc(ap.nombre) + '">Quitar</button></span>' +
+        '<div class="ap-nombre"><b>' + esc(ap.nombre) + '</b><small>' + detalle.join(' · ') + '</small></div>' +
+        '<div class="ap-horario"><span>' + esc(VC.textoHorario(ap.rangos)) + '</span><small>' + textoHoras(horas) + ' al día<span class="kwh-movil"> · ' + fmt(it.dia, 2) + ' kWh/día</span></small></div>' +
+        '<div class="ap-kwh r"><b>' + fmt(it.dia, 2) + '</b><small>kWh/día</small></div>' +
+        '<div class="ap-costo r"><b>' + rd(it.costo, 0) + '</b><small>' + fmt(it.parte * 100, 0) + ' % · ' + estado.periodo + ' días</small>' +
+        '<span class="mini" aria-hidden="true"><i style="width:' + (max > 0 ? it.costo / max * 100 : 0) + '%"></i></span></div>' +
+        '<div class="acts"><button class="btn small ghost" type="button" data-accion="editar" aria-label="Editar ' + esc(ap.nombre) + '">Editar</button><button class="btn small ghost danger" type="button" data-accion="quitar" aria-label="Quitar ' + esc(ap.nombre) + '">Quitar</button></div>' +
         '</div>';
     }).join('');
+  }
+
+  // Rellena el formulario con un aparato del catálogo (índice) o lo deja libre ("otro").
+  function elegirDelCatalogo(v) {
+    if (v === '') return;
+    if (v === 'otro') { $('#f-nombre').value = ''; $('#f-watts').value = ''; cargarHorarioVisual(''); $('#f-nombre').focus(); actualizarVistaPrevia(); return; }
+    const a = D.CATALOGO[+v];
+    if (!a) return;
+    $('#f-nombre').value = a.nombre;
+    $('#f-watts').value = a.watts;
+    cargarHorarioVisual(a.horario);
+    $('#f-error').textContent = '';
+    actualizarVistaPrevia();
   }
 
   function llenarCatalogo() {
@@ -370,7 +436,14 @@
     if (r.datos.watts > 0 && r.datos.rangos && r.datos.cantidad >= 1 && r.datos.ciclo > 0) {
       const ap = Object.assign({}, r.datos, { ciclo: Math.min(1, r.datos.ciclo) });
       const dia = VC.energiaDiaria(ap);
-      prev.innerHTML = 'Consumirá <b class="mono">' + fmt(dia, 2) + ' kWh</b> al día (' + fmt(VC.horasDeUso(ap.rangos), 2) + ' h de uso) y unos <b class="mono">' + fmt(dia * estado.periodo, 0) + ' kWh</b> en ' + estado.periodo + ' días.' +
+      // Cuánto sube la factura con este aparato (considera el bloque tarifario).
+      let base = (ultimoCalculo || calcular()).periodoKwh;
+      const anterior = editandoId && estado.aparatos.find(function (a) { return a.id === editandoId; });
+      if (anterior) base -= VC.energiaDiaria(anterior) * estado.periodo;
+      base = Math.max(0, base);
+      const extra = VC.factura(base + dia * estado.periodo, estado.tarifa).total - VC.factura(base, estado.tarifa).total;
+      prev.innerHTML = 'Consumirá <b class="mono">' + fmt(dia, 2) + ' kWh</b> al día (' + textoHoras(VC.horasDeUso(ap.rangos)) + ' de uso) y unos <b class="mono">' + fmt(dia * estado.periodo, 0) + ' kWh</b> en ' + estado.periodo + ' días.' +
+        '<br>Le suma a tu factura unos <b class="mono">' + rd(extra, 0) + '</b> cada ' + estado.periodo + ' días.' +
         (ap.ciclo < 1 ? '<br><span class="nota-ciclo">Ya se descontó que su motor o resistencia prende y apaga solo: trabaja cerca del ' + fmt(ap.ciclo * 100, 0) + ' % del tiempo.</span>' : '');
     } else {
       prev.textContent = 'Completa los datos para ver cuánto consumirá.';
@@ -424,7 +497,7 @@
     const ancho = Math.max(280, cont.clientWidth || 700);
     const angosto = ancho < 520;
     const alto = angosto ? 245 : 330;
-    const m = { l: 48, r: 12, t: 14, b: 40 };
+    const m = { l: 48, r: 12, t: 24, b: 40 };
     const iw = ancho - m.l - m.r, ih = alto - m.t - m.b;
     const ap = estado.aparatos;
     const P = function (t) { return VC.potenciaEn(t, ap); };
@@ -458,6 +531,8 @@
     }
     const tituloX = svg('text', { x: m.l + iw / 2, y: alto - 4, 'text-anchor': 'middle', class: 'axis-title' }, s);
     tituloX.textContent = 'Hora del día';
+    const tituloY = svg('text', { x: m.l - 8, y: 11, 'text-anchor': 'end', class: 'axis-title' }, s);
+    tituloY.textContent = 'kW';
 
     if (!tramos.length || pMax === 0) {
       const t = svg('text', { x: m.l + iw / 2, y: m.t + ih / 2, 'text-anchor': 'middle', class: 'axis-title' }, s);
@@ -537,6 +612,7 @@
     const tipo = abs < 1 ? 'good' : abs < 10 ? 'warn' : 'crit';
     $('#r-error').innerHTML = '<span class="pill ' + tipo + '">Error ' + (error >= 0 ? '+' : '−') + fmt(abs, 1) + ' %</span>';
     $('#n-slider').value = estado.nIndice;
+    $('#n-slider').style.setProperty('--p', (estado.nIndice / (N_VALORES.length - 1) * 100) + '%');
     $('#n-slider').setAttribute('aria-valuetext', n + ' trapecios');
     $('#mostrar-trap').checked = estado.trapecios;
     $('#leyenda-trap').hidden = !estado.trapecios;
@@ -651,12 +727,17 @@
     hechos.innerHTML =
       '<div class="fact"><span class="label">Ritmo según lecturas</span><span class="val">' + fmt(proy.ritmo, 2) + ' kWh/día</span><span class="sub">Consumo de aparatos respecto al ritmo: ' + fmt(cobertura, 0) + ' %</span></div>' +
       '<div class="fact"><span class="label">Proyección a ' + proy.periodo + ' días</span><span class="val">' + fmt(proy.total, 0) + ' kWh</span><span class="sub">Factura ≈ ' + rd(facProy.total, 0) + '</span></div>' +
-      '<div class="fact"><span class="label">Próximo bloque</span><span class="val" style="font-size:.95rem;font-family:var(--font-body)">' + cambio + '</span></div>';
+      '<div class="fact"><span class="label">Próximo bloque</span><span class="val texto">' + cambio + '</span></div>';
   }
 
   function renderLecturas() {
     const cont = $('#lista-lecturas');
     const orden = estado.lecturas.slice().sort(function (a, b) { return a.fecha < b.fecha ? -1 : 1; });
+    // nota del formulario rápido del Resumen
+    const ultima = orden[orden.length - 1];
+    $('#lr-nota').textContent = !ultima ? 'Anota el número que marca tu contador.'
+      : ultima.fecha === hoyISO() ? 'Ya anotaste hoy: ' + fmt(ultima.valor, 1) + ' kWh (puedes corregirla).'
+      : 'Última: ' + fmt(ultima.valor, 1) + ' kWh el ' + fechaCorta(ultima.fecha) + '.';
     if (!orden.length) { cont.innerHTML = '<div class="empty">Sin lecturas todavía.</div>'; return; }
     const filas = orden.map(function (l, i) {
       const ant = orden[i - 1];
@@ -680,9 +761,12 @@
 
     if (!items.length) {
       cont.innerHTML = '<div class="empty">Agrega aparatos para simular.</div>';
+      cont.dataset.firma = '';
       $('#resultado-ahorro').innerHTML = '';
+      $('#barra-ahorro').hidden = true;
       return;
     }
+    $('#barra-ahorro').hidden = false;
     // limpiar reducciones de aparatos que ya no existen o exceden sus horas
     Object.keys(estado.reducciones).forEach(function (id) {
       const ap = estado.aparatos.find(function (a) { return a.id === id; });
@@ -711,6 +795,9 @@
       if (document.activeElement !== input) input.value = r;
       const horas = VC.horasDeUso(ap.rangos);
       const ahorroDia = VC.potenciaMedia(ap) * r / 1000;
+      input.style.setProperty('--p', (horas > 0 ? r / horas * 100 : 0) + '%');
+      input.setAttribute('aria-valuetext', r > 0 ? textoHoras(r) + ' menos al día' : 'sin cambios');
+      fila.classList.toggle('activo', r > 0);
       fila.querySelector('[data-salida]').textContent = r > 0
         ? '−' + textoHoras(r) + ' · ahorra ' + fmt(ahorroDia, 2) + ' kWh/día'
         : 'usa ' + textoHoras(horas) + ' al día';
@@ -725,11 +812,18 @@
     $('#resultado-ahorro').innerHTML =
       '<h3>Resultado</h3>' +
       '<div class="compare">' +
-      '<div><span class="k">Ahora</span><span class="v">' + fmt(c.periodoKwh, 0) + ' kWh</span><span class="mono" style="font-size:.9rem">' + rd(c.factura.total, 0) + '</span></div>' +
-      '<div><span class="k">Con los cambios</span><span class="v">' + fmt(nuevoPeriodo, 0) + ' kWh</span><span class="mono" style="font-size:.9rem">' + rd(facNueva.total, 0) + '</span></div>' +
+      '<div><span class="k">Ahora</span><span class="v">' + fmt(c.periodoKwh, 0) + ' kWh</span><span class="rd">' + rd(c.factura.total, 0) + '</span></div>' +
+      '<div><span class="k">Con los cambios</span><span class="v">' + fmt(nuevoPeriodo, 0) + ' kWh</span><span class="rd">' + rd(facNueva.total, 0) + '</span></div>' +
       '</div>' +
-      '<div class="savings"><span class="k" style="font-size:.85rem;font-weight:600;color:var(--ink-2)">Ahorro en ' + estado.periodo + ' días</span><span class="v">' + rd(ahorro, 0) + '</span><span class="sub">≈ ' + rd(ahorro * 365 / estado.periodo, 0) + ' al año · ' + fmt(c.periodoKwh - nuevoPeriodo, 0) + ' kWh menos</span></div>' +
-      (ahorro === 0 ? '<p style="color:var(--muted)">Mueve alguna barra para ver el ahorro.</p>' : bloqueTxt);
+      '<div class="savings"><span class="k">Ahorro en ' + estado.periodo + ' días</span><span class="v">' + rd(ahorro, 0) + '</span><span class="sub">≈ ' + rd(ahorro * 365 / estado.periodo, 0) + ' al año · ' + fmt(c.periodoKwh - nuevoPeriodo, 0) + ' kWh menos</span></div>' +
+      (ahorro === 0 ? '<p class="vacio-sim">Mueve alguna barra para ver el ahorro.</p>' : bloqueTxt);
+
+    // En el celular, el resultado queda fijo abajo mientras se mueven las barras.
+    const barra = $('#barra-ahorro');
+    barra.classList.toggle('con-ahorro', ahorro > 0);
+    barra.innerHTML = ahorro > 0
+      ? '<span>Ahorras en ' + estado.periodo + ' días<br>≈ ' + rd(ahorro * 365 / estado.periodo, 0) + ' al año</span><b>' + rd(ahorro, 0) + '</b>'
+      : '<span>Factura actual<br>Mueve una barra para ahorrar</span><b>' + rd(c.factura.total, 0) + '</b>';
   }
 
   function textoHoras(h) {
@@ -807,6 +901,10 @@
         const titulo = activa.querySelector('h1, h2');
         titulo.tabIndex = -1;
         titulo.focus({ preventScroll: true });
+        // cambio de sección suave (el CSS lo desactiva si se pidió menos movimiento)
+        activa.classList.remove('entrando');
+        void activa.offsetWidth;
+        activa.classList.add('entrando');
       }
       if (ultimoCalculo) {
         if (activa.id === 'resumen') renderCurva(ultimoCalculo);
@@ -817,17 +915,11 @@
     navegar(false);
 
 
-    $('#f-catalogo').addEventListener('change', function (e) {
-      const v = e.target.value;
-      if (v === '' ) return;
-      if (v === 'otro') { $('#f-nombre').value = ''; $('#f-watts').value = ''; cargarHorarioVisual(''); $('#f-nombre').focus(); actualizarVistaPrevia(); return; }
-      const a = D.CATALOGO[+v];
-      $('#f-nombre').value = a.nombre;
-      $('#f-watts').value = a.watts;
-      cargarHorarioVisual(a.horario);
-      $('#f-error').textContent = '';
-      actualizarVistaPrevia();
+    document.querySelectorAll('main > section').forEach(function (s) {
+      s.addEventListener('animationend', function () { s.classList.remove('entrando'); });
     });
+
+    $('#f-catalogo').addEventListener('change', function (e) { elegirDelCatalogo(e.target.value); });
 
     ['#f-nombre', '#f-watts', '#f-cantidad', '#f-horario'].forEach(function (s) {
       $(s).addEventListener('input', actualizarVistaPrevia);
@@ -865,36 +957,34 @@
       abrirEditor();
       $('#f-catalogo').focus();
     });
-    // Botones para todos los aparatos: hay que pulsar dos veces para confirmar,
-    // porque borran o reemplazan la lista completa.
-    function botonConConfirmacion(boton, textoConfirmar, accion) {
-      const textoNormal = boton.textContent;
-      let espera = null;
-      boton.addEventListener('click', function () {
-        if (!espera) {
-          boton.textContent = textoConfirmar;
-          boton.classList.add('confirmando');
-          espera = setTimeout(function () { boton.textContent = textoNormal; boton.classList.remove('confirmando'); espera = null; }, 4000);
-          return;
-        }
-        clearTimeout(espera); espera = null;
-        boton.textContent = textoNormal; boton.classList.remove('confirmando');
-        accion();
+    // Menú "Más opciones": acciones sobre toda la lista. En vez de pedir confirmación,
+    // se pueden deshacer desde el aviso que aparece abajo.
+    const menu = $('#menu-aparatos');
+    document.addEventListener('click', function (e) {
+      if (menu.open && !menu.contains(e.target)) menu.open = false;
+      const ej = $('#aviso-ejemplo');
+      if (ej.open && !ej.contains(e.target)) ej.open = false;
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      if (menu.open) { menu.open = false; menu.querySelector('summary').focus(); }
+      if ($('#aviso-ejemplo').open) $('#aviso-ejemplo').open = false;
+    });
+    $('#btn-quitar-todos').addEventListener('click', function () {
+      menu.open = false;
+      conDeshacer('Se quitaron todos los aparatos.', function () {
+        estado.aparatos = [];
+        estado.reducciones = {};
+        marcarEditado();
       });
-    }
-    botonConConfirmacion($('#btn-quitar-todos'), '¿Seguro? Pulsa otra vez', function () {
-      estado.aparatos = [];
-      estado.reducciones = {};
-      marcarEditado();
-      renderTodo();
-      anunciar('Se quitaron todos los aparatos.');
       $('#btn-agregar').focus();
     });
-    botonConConfirmacion($('#btn-restaurar-aparatos'), 'Reemplazar mi lista: pulsa otra vez', function () {
-      estado.aparatos = D.EJEMPLO_APARATOS.map(aparatoDesde);
-      estado.reducciones = {};
-      renderTodo();
-      anunciar('Se restauraron los 12 aparatos del ejemplo.');
+    $('#btn-restaurar-aparatos').addEventListener('click', function () {
+      menu.open = false;
+      conDeshacer('Se cargaron los 12 aparatos del ejemplo.', function () {
+        estado.aparatos = D.EJEMPLO_APARATOS.map(aparatoDesde);
+        estado.reducciones = {};
+      });
     });
 
     $('#agregar-intervalo').addEventListener('click', function () {
@@ -908,18 +998,28 @@
 
 
     $('#lista-aparatos').addEventListener('click', function (e) {
+      const atajo = e.target.closest('button[data-catalogo]');
+      if (atajo) {
+        limpiarFormulario();
+        abrirEditor();
+        $('#f-catalogo').value = atajo.dataset.catalogo;
+        elegirDelCatalogo(atajo.dataset.catalogo);
+        if (atajo.dataset.catalogo !== 'otro') $('#f-guardar').focus();
+        return;
+      }
       const btn = e.target.closest('button[data-accion]');
       if (!btn) return;
       const id = btn.closest('.row').dataset.id;
       if (btn.dataset.accion === 'editar') editarAparato(id);
       else {
         const ap = estado.aparatos.find(function (a) { return a.id === id; });
-        estado.aparatos = estado.aparatos.filter(function (a) { return a.id !== id; });
-        delete estado.reducciones[id];
-        if (editandoId === id) limpiarFormulario();
-        marcarEditado();
-        anunciar((ap ? ap.nombre : 'Aparato') + ' quitado.');
-        renderTodo();
+        conDeshacer((ap ? ap.nombre : 'Aparato') + ' quitado.', function () {
+          estado.aparatos = estado.aparatos.filter(function (a) { return a.id !== id; });
+          delete estado.reducciones[id];
+          if (editandoId === id) limpiarFormulario();
+          marcarEditado();
+        });
+        $('#btn-agregar').focus();
       }
     });
 
@@ -937,36 +1037,57 @@
     });
 
     // lecturas
-    $('#l-fecha').value = hoyISO();
-    $('#form-lectura').addEventListener('submit', function (e) {
-      e.preventDefault();
-      const fecha = $('#l-fecha').value;
-      const valor = parseFloat($('#l-valor').value);
-      const err = $('#l-error');
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) { err.textContent = 'Elige la fecha de la lectura.'; return; }
-      if (!(valor >= 0)) { err.textContent = 'Escribe el número que marca el contador.'; return; }
+    // Valida y guarda una lectura. Devuelve el texto del error, o '' si se guardó.
+    function guardarLectura(fecha, valor) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return 'Elige la fecha de la lectura.';
+      if (!(valor >= 0)) return 'Escribe el número que marca el contador.';
       const otras = estado.lecturas.filter(function (l) { return l.fecha !== fecha; });
       const antes = otras.filter(function (l) { return l.fecha < fecha; }).sort(function (a, b) { return a.fecha < b.fecha ? -1 : 1; }).pop();
       const despues = otras.filter(function (l) { return l.fecha > fecha; }).sort(function (a, b) { return a.fecha < b.fecha ? -1 : 1; })[0];
-      if (antes && valor < antes.valor) { err.textContent = 'La lectura no puede ser menor que la del ' + fechaCorta(antes.fecha) + ' (' + fmt(antes.valor, 1) + '). El contador solo sube.'; return; }
-      if (despues && valor > despues.valor) { err.textContent = 'La lectura no puede ser mayor que la del ' + fechaCorta(despues.fecha) + ' (' + fmt(despues.valor, 1) + ').'; return; }
-      err.textContent = '';
+      if (antes && valor < antes.valor) return 'La lectura no puede ser menor que la del ' + fechaCorta(antes.fecha) + ' (' + fmt(antes.valor, 1) + '). El contador solo sube.';
+      if (despues && valor > despues.valor) return 'La lectura no puede ser mayor que la del ' + fechaCorta(despues.fecha) + ' (' + fmt(despues.valor, 1) + ').';
       otras.push({ fecha: fecha, valor: valor });
       estado.lecturas = otras;
       actualizarOrigenLecturas();
       marcarEditado();
+      return '';
+    }
+
+    $('#l-fecha').value = hoyISO();
+    $('#form-lectura').addEventListener('submit', function (e) {
+      e.preventDefault();
+      const fecha = $('#l-fecha').value;
+      const previo = clonar(estado);
+      const error = guardarLectura(fecha, parseFloat($('#l-valor').value));
+      $('#l-error').textContent = error;
+      if (error) return;
       $('#l-valor').value = '';
       $('#l-fecha').value = sumarDias(fecha, 1);
-      anunciar('Lectura guardada.');
       renderTodo();
+      mostrarAviso('Lectura del ' + fechaCorta(fecha) + ' guardada.', deshacerA(previo));
     });
+
+    // Lectura rápida desde el Resumen (siempre con la fecha de hoy).
+    $('#form-lectura-rapida').addEventListener('submit', function (e) {
+      e.preventDefault();
+      const previo = clonar(estado);
+      const error = guardarLectura(hoyISO(), parseFloat($('#lr-valor').value));
+      $('#lr-error').textContent = error;
+      $('#lr-valor').classList.toggle('invalid', !!error);
+      if (error) return;
+      $('#lr-valor').value = '';
+      renderTodo();
+      mostrarAviso('Lectura de hoy guardada.', deshacerA(previo));
+    });
+
     $('#lista-lecturas').addEventListener('click', function (e) {
       const btn = e.target.closest('button[data-fecha]');
       if (!btn) return;
-      estado.lecturas = estado.lecturas.filter(function (l) { return l.fecha !== btn.dataset.fecha; });
-      actualizarOrigenLecturas();
-      marcarEditado();
-      renderTodo();
+      conDeshacer('Lectura del ' + fechaCorta(btn.dataset.fecha) + ' borrada.', function () {
+        estado.lecturas = estado.lecturas.filter(function (l) { return l.fecha !== btn.dataset.fecha; });
+        actualizarOrigenLecturas();
+        marcarEditado();
+      });
     });
 
     // simulador
@@ -1010,36 +1131,182 @@
     ['#t-0', '#t-1', '#t-2', '#t-3', '#t-fijo', '#t-periodo'].forEach(function (s) { $(s).addEventListener('input', leerTarifa); });
     ['#t-todo', '#t-itbis'].forEach(function (s) { $(s).addEventListener('change', leerTarifa); });
     $('#btn-tarifa-ref').addEventListener('click', function () {
-      estado.tarifa = clonar(D.TARIFA);
-      estado.periodo = 30;
-      renderTodo();
-      anunciar('Tarifa de referencia restaurada.');
+      conDeshacer('Tarifa de referencia restaurada.', function () {
+        estado.tarifa = clonar(D.TARIFA);
+        estado.periodo = 30;
+      });
     });
 
     // aviso de ejemplo
-    let confirmando = null;
-    $('#btn-limpiar').addEventListener('click', function (e) {
-      const btn = e.currentTarget;
-      if (!confirmando) {
-        btn.textContent = 'Sí, borrar el ejemplo';
-        btn.classList.add('danger');
-        confirmando = setTimeout(function () { btn.textContent = 'Empezar desde cero'; btn.classList.remove('danger'); confirmando = null; }, 4000);
-        return;
-      }
-      clearTimeout(confirmando); confirmando = null;
-      btn.textContent = 'Empezar desde cero'; btn.classList.remove('danger');
-      estado.aparatos = [];
-      estado.lecturas = [];
-      estado.lecturasEjemplo = false;
-      estado.reducciones = {};
-      estado.ejemplo = false;
-      limpiarFormulario();
-      renderTodo();
+    $('#btn-limpiar').addEventListener('click', function () {
+      $('#aviso-ejemplo').open = false;
+      conDeshacer('Empezaste desde cero.', function () {
+        estado.aparatos = [];
+        estado.lecturas = [];
+        estado.lecturasEjemplo = false;
+        estado.reducciones = {};
+        estado.ejemplo = false;
+        limpiarFormulario();
+      });
       irA('aparatos');
     });
     $('#btn-ocultar-aviso').addEventListener('click', function () {
       estado.ejemplo = false;
       renderTodo();
+    });
+
+    // aviso flotante
+    $('#toast-deshacer').addEventListener('click', function () {
+      const accion = accionDeshacer;
+      ocultarAviso();
+      if (accion) accion();
+    });
+
+    // ---------- tema claro / oscuro ----------
+    const consultaOscuro = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+    function temaActual() {
+      const t = document.documentElement.getAttribute('data-theme');
+      if (t === 'light' || t === 'dark') return t;
+      return consultaOscuro && consultaOscuro.matches ? 'dark' : 'light';
+    }
+    function pintarBotonTema() {
+      const oscuro = temaActual() === 'dark';
+      const b = $('#btn-tema');
+      b.classList.toggle('oscuro', oscuro);
+      $('#tema-texto').textContent = oscuro ? 'Modo claro' : 'Modo oscuro';
+      b.setAttribute('aria-label', oscuro ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro');
+    }
+    $('#btn-tema').addEventListener('click', function () {
+      const nuevo = temaActual() === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', nuevo);
+      try { localStorage.setItem('volticontrol.tema', nuevo); } catch (e) { /* sin almacenamiento */ }
+      pintarBotonTema();
+    });
+    if (consultaOscuro && consultaOscuro.addEventListener) consultaOscuro.addEventListener('change', pintarBotonTema);
+    pintarBotonTema();
+
+    // ---------- compartir el hogar con un enlace ----------
+    function aBase64Url(texto) {
+      const bytes = new TextEncoder().encode(texto);
+      let bin = '';
+      bytes.forEach(function (b) { bin += String.fromCharCode(b); });
+      return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+    function deBase64Url(texto) {
+      const b64 = texto.replace(/-/g, '+').replace(/_/g, '/');
+      const bin = atob(b64 + '==='.slice((b64.length + 3) % 4));
+      return new TextDecoder().decode(Uint8Array.from(bin, function (c) { return c.charCodeAt(0); }));
+    }
+    function codificarHogar() {
+      return aBase64Url(JSON.stringify({
+        v: 1,
+        a: estado.aparatos.map(function (a) { return [a.nombre, a.watts, a.cantidad, a.ciclo, a.horario]; }),
+        t: [estado.tarifa.bloques.map(function (b) { return b.precio; }), estado.tarifa.cargoFijo, estado.tarifa.ultimoBloqueATodo ? 1 : 0, estado.tarifa.itbisSobreUmbral ? 1 : 0],
+        d: estado.periodo,
+        l: estado.lecturas.map(function (l) { return [l.fecha, l.valor]; })
+      }));
+    }
+    // Lee un hogar compartido. Todo se valida: el enlace puede venir de cualquiera.
+    function decodificarHogar(texto) {
+      try {
+        const d = JSON.parse(deBase64Url(texto));
+        if (!d || d.v !== 1 || !Array.isArray(d.a)) return null;
+        const aparatos = d.a.slice(0, 100).filter(Array.isArray).map(function (x) {
+          return aparatoDesde({ nombre: String(x[0] || 'Aparato').slice(0, 60), watts: x[1], cantidad: x[2], ciclo: x[3], horario: String(x[4] || '').slice(0, 120) });
+        }).filter(function (a) { return a.rangos && a.watts > 0 && a.watts <= 20000; });
+        const tarifa = clonar(D.TARIFA);
+        if (Array.isArray(d.t) && Array.isArray(d.t[0]) && d.t[0].length === 4) {
+          d.t[0].forEach(function (p, i) { if (+p >= 0) tarifa.bloques[i].precio = +p; });
+          if (+d.t[1] >= 0) tarifa.cargoFijo = +d.t[1];
+          tarifa.ultimoBloqueATodo = !!d.t[2];
+          tarifa.itbisSobreUmbral = !!d.t[3];
+        }
+        const lecturas = Array.isArray(d.l) ? d.l.slice(0, 400).filter(function (x) {
+          return Array.isArray(x) && /^\d{4}-\d{2}-\d{2}$/.test(x[0]) && isFinite(x[1]) && +x[1] >= 0;
+        }).map(function (x) { return { fecha: x[0], valor: +x[1] }; }) : [];
+        const periodo = d.d >= 1 && d.d <= 62 ? Math.round(d.d) : 30;
+        return { aparatos: aparatos, tarifa: tarifa, lecturas: lecturas, periodo: periodo };
+      } catch (e) {
+        return null;
+      }
+    }
+    function enlaceBase() { return location.href.split(/[?#]/)[0]; }
+    $('#btn-compartir').addEventListener('click', function () {
+      const url = enlaceBase() + '?hogar=' + codificarHogar();
+      if (navigator.share) {
+        navigator.share({ title: 'VoltiControl', text: 'Mira el consumo eléctrico de este hogar en VoltiControl', url: url }).catch(function () { /* cancelado */ });
+        return;
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(url).then(function () {
+          mostrarAviso('Enlace copiado. Pégalo en WhatsApp o donde quieras.');
+        }, function () { window.prompt('Copia este enlace:', url); });
+      } else {
+        window.prompt('Copia este enlace:', url);
+      }
+    });
+
+    function quitarParametroHogar() {
+      try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) { /* sin historial */ }
+    }
+    let compartido = null;
+    try {
+      const codigo = new URLSearchParams(location.search).get('hogar');
+      if (codigo) compartido = decodificarHogar(codigo);
+      if (codigo && !compartido) { quitarParametroHogar(); mostrarAviso('El enlace compartido está incompleto o dañado.'); }
+    } catch (e) { compartido = null; }
+    if (compartido) {
+      $('#aviso-compartido-texto').textContent = 'Te compartieron un hogar con ' + compartido.aparatos.length + ' aparato' + (compartido.aparatos.length === 1 ? '' : 's') +
+        (compartido.lecturas.length ? ' y ' + compartido.lecturas.length + ' lecturas' : '') + '. Si lo abres, podrás volver a tus datos con "Deshacer".';
+      $('#aviso-compartido').hidden = false;
+    }
+    $('#btn-cargar-compartido').addEventListener('click', function () {
+      if (!compartido) return;
+      const datos = compartido;
+      $('#aviso-compartido').hidden = true;
+      quitarParametroHogar();
+      conDeshacer('Estás viendo el hogar compartido.', function () {
+        estado.aparatos = datos.aparatos;
+        estado.tarifa = datos.tarifa;
+        estado.lecturas = datos.lecturas;
+        estado.periodo = datos.periodo;
+        estado.reducciones = {};
+        estado.ejemplo = false;
+        actualizarOrigenLecturas();
+      });
+      irA('resumen');
+    });
+    $('#btn-ignorar-compartido').addEventListener('click', function () {
+      $('#aviso-compartido').hidden = true;
+      quitarParametroHogar();
+    });
+
+    // ---------- imprimir / guardar en PDF ----------
+    let antesDeImprimirEstado = null;
+    function prepararImpresion() {
+      if (antesDeImprimirEstado) return;
+      $('#fecha-impresion').textContent = new Date().toLocaleDateString('es-DO', { day: 'numeric', month: 'long', year: 'numeric' });
+      const secciones = Array.from(document.querySelectorAll('main > section'));
+      antesDeImprimirEstado = {
+        ocultas: secciones.filter(function (s) { return s.hidden; }),
+        cerradas: Array.from(document.querySelectorAll('details.desplegable:not([open])'))
+      };
+      secciones.forEach(function (s) { s.hidden = false; });
+      antesDeImprimirEstado.cerradas.forEach(function (d) { d.open = true; });
+      renderCurva(ultimoCalculo);
+      renderMedidor(ultimoCalculo);
+    }
+    function terminarImpresion() {
+      if (!antesDeImprimirEstado) return;
+      antesDeImprimirEstado.ocultas.forEach(function (s) { s.hidden = true; });
+      antesDeImprimirEstado.cerradas.forEach(function (d) { d.open = false; });
+      antesDeImprimirEstado = null;
+    }
+    window.addEventListener('beforeprint', prepararImpresion);
+    window.addEventListener('afterprint', terminarImpresion);
+    $('#btn-imprimir').addEventListener('click', function () {
+      prepararImpresion();
+      window.print();
     });
 
 

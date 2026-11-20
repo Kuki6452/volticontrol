@@ -6,6 +6,12 @@
 <title>VoltiControl</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="description" content="Calcula el consumo eléctrico de tu hogar con integrales, estima tu factura y simula cuánto puedes ahorrar.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3E%3Ccircle cx='15' cy='15' r='15' fill='%23102e29'/%3E%3Cpath d='M16.6 5.5 9.5 16.4h5.1l-1.4 8.1 7.3-11h-5.2z' fill='%23cbf76b'/%3E%3C/svg%3E">
+<script>
+  // Aplica el tema elegido antes de pintar la página (evita un parpadeo de color).
+  try { var t = localStorage.getItem('volticontrol.tema'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -20,39 +26,82 @@
       <b>VoltiControl</b>
     </a>
     <nav class="nav" aria-label="Secciones">
-      <a href="#resumen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>Resumen</a>
-      <a href="#aparatos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v5m8-5v5M6 8h12v3a6 6 0 0 1-12 0V8Zm6 9v4"/></svg>Aparatos</a>
-      <a href="#ahorro"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M8 4v4m8 2v4m-6 2v4"/></svg>Simulador</a>
-      <a href="#medidor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17a8 8 0 1 1 16 0H4Zm8-3 3-4"/></svg>Contador</a>
-      <a href="#tarifa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 6h6m-6 4h6"/></svg>Tarifa</a>
-      <a href="#matematica"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 4H7l6 8-6 8h10"/></svg>La matemática</a>
+      <a href="#resumen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg><span>Resumen</span></a>
+      <a href="#aparatos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v5m8-5v5M6 8h12v3a6 6 0 0 1-12 0V8Zm6 9v4"/></svg><span>Aparatos</span></a>
+      <a href="#ahorro"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M8 4v4m8 2v4m-6 2v4"/></svg><span>Simulador</span></a>
+      <a href="#medidor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17a8 8 0 1 1 16 0H4Zm8-3 3-4"/></svg><span>Contador</span></a>
+      <a href="#tarifa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 6h6m-6 4h6"/></svg><span>Tarifa</span></a>
+      <a href="#matematica"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 4H7l6 8-6 8h10"/></svg><span>Matemática</span></a>
     </nav>
+    <button class="tema" id="btn-tema" type="button">
+      <svg class="icono-luna" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg>
+      <svg class="icono-sol" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <span id="tema-texto">Modo oscuro</span>
+    </button>
   </div>
 </header>
 
 <div class="lienzo">
 <noscript><p class="sin-js"><b>Esta vista no ejecuta la app.</b> Abre el archivo con Chrome o Safari (en el celular: botón de compartir o los tres puntos → "Abrir con Chrome").</p></noscript>
+
+<div class="aviso-compartido" id="aviso-compartido" role="region" aria-label="Hogar compartido" hidden>
+  <div class="wrap">
+    <p id="aviso-compartido-texto">Te compartieron un hogar.</p>
+    <div class="botones">
+      <button class="btn primary small" id="btn-cargar-compartido" type="button">Ver este hogar</button>
+      <button class="btn small" id="btn-ignorar-compartido" type="button">Seguir con el mío</button>
+    </div>
+  </div>
+</div>
+
+<div class="solo-impresion" id="cabecera-impresion">
+  <b>VoltiControl · Informe de consumo eléctrico</b>
+  <span id="fecha-impresion"></span>
+</div>
+
 <main id="inicio">
 
   <!-- RESUMEN -->
   <section class="block" id="resumen">
     <div class="wrap">
       <div class="sec-head resumen-head">
-        <h1 tabindex="-1">Consumo eléctrico</h1>
-        <details id="aviso-ejemplo">
-          <summary>Hogar de ejemplo</summary>
-          <div class="ejemplo-opciones">
-            <p>Los aparatos y las lecturas iniciales son de demostración.</p>
-            <div class="ejemplo-botones">
-              <button class="btn small" id="btn-limpiar" type="button">Empezar desde cero</button>
-              <button class="btn small ghost" id="btn-ocultar-aviso" type="button">Usar el ejemplo</button>
+        <div class="titulo-resumen">
+          <h1 tabindex="-1">Consumo eléctrico</h1>
+          <details id="aviso-ejemplo">
+            <summary>Hogar de ejemplo</summary>
+            <div class="ejemplo-opciones">
+              <p>Los aparatos y las lecturas iniciales son de demostración.</p>
+              <div class="ejemplo-botones">
+                <button class="btn small" id="btn-limpiar" type="button">Empezar desde cero</button>
+                <button class="btn small ghost" id="btn-ocultar-aviso" type="button">Usar el ejemplo</button>
+              </div>
             </div>
-          </div>
-        </details>
+          </details>
+        </div>
+        <div class="herramientas">
+          <button class="btn small" id="btn-compartir" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4M18 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm12 7a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/></svg>
+            Compartir
+          </button>
+          <button class="btn small" id="btn-imprimir" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6M6 18H4v-7h16v7h-2M8 14h8v7H8z"/></svg>
+            Imprimir / PDF
+          </button>
+        </div>
       </div>
       <p class="lead-resumen">Descubre qué aparatos suben tu factura. VoltiControl integra la curva de potencia de tu casa para calcular los kWh, estima la factura con la tarifa por bloques y te muestra cuánto ahorras si cambias tus hábitos.</p>
       <div class="stats" id="stats"></div>
       <p class="top-aparato" id="top-aparato"></p>
+
+      <form class="lectura-rapida" id="form-lectura-rapida" novalidate>
+        <label for="lr-valor">Lectura del contador hoy</label>
+        <div class="lectura-rapida-campos">
+          <input type="number" id="lr-valor" min="0" step="0.1" inputmode="decimal" placeholder="kWh">
+          <button class="btn small" type="submit">Guardar</button>
+        </div>
+        <span class="nota" id="lr-nota"></span>
+        <div class="error" id="lr-error" role="alert"></div>
+      </form>
 
       <div class="panel curva-principal">
         <div class="cabecera-curva">
@@ -71,7 +120,7 @@
             <div>
               <div class="label" id="r-trap-label">Regla del trapecio</div>
               <div class="big" id="r-trap"></div>
-              <div id="r-error" style="margin-top:4px"></div>
+              <div id="r-error" class="r-error"></div>
             </div>
             <div class="sep"></div>
             <div class="n-control">
@@ -80,7 +129,7 @@
               <div class="ticks"><span>4</span><span>6</span><span>8</span><span>12</span><span>24</span><span>48</span><span>96</span><span>288</span></div>
             </div>
             <label class="check"><input type="checkbox" id="mostrar-trap"> Mostrar trapecios en la gráfica</label>
-            <p style="font-size:.9rem;color:var(--ink-2)" id="r-explica"></p>
+            <p class="explica" id="r-explica"></p>
           </div>
         </details>
       </div>
@@ -96,11 +145,11 @@
         <div class="bill">
           <div class="panel">
             <h3>Desglose de la factura estimada</h3>
-            <table id="tabla-factura" style="margin-top:10px"></table>
+            <table id="tabla-factura"></table>
           </div>
           <div class="panel">
             <h3>¿En qué bloque tarifario estás?</h3>
-            <p style="color:var(--muted);font-size:.92rem;margin-top:4px">Mientras más kWh consumes en el mes, más caro sale cada kWh adicional.</p>
+            <p class="nota">Mientras más kWh consumes en el mes, más caro sale cada kWh adicional.</p>
             <div class="scale-wrap"><div class="scale" id="escala"></div></div>
             <p class="source" id="escala-nota"></p>
           </div>
@@ -109,15 +158,8 @@
 
       <details class="panel desplegable">
         <summary>Consumo por aparato</summary>
-        <div class="panel" style="margin-top:20px">
-          <div class="sec-head" style="margin-bottom:12px">
-            <div>
-              <h3>¿Quién pesa más en la factura?</h3>
-              <p style="margin-top:4px">Consumo de cada aparato en el período y su parte de la factura, al precio promedio por kWh.</p>
-            </div>
-          </div>
-          <div class="bars" id="barras"></div>
-        </div>
+        <p class="nota">Consumo de cada aparato en el período y su parte de la factura, al precio promedio por kWh.</p>
+        <div class="bars" id="barras"></div>
       </details>
     </div>
   </section>
@@ -128,58 +170,61 @@
       <div class="sec-head">
         <div>
           <h2 tabindex="-1">Aparatos</h2>
-          <p>Cada aparato aporta un rectángulo de energía: potencia × horas × cantidad × ciclo.</p>
+          <p>Cada aparato aporta un rectángulo de energía: potencia × horas × cantidad × ciclo. Ordenados del que más cuesta al que menos.</p>
         </div>
         <div class="acciones-aparatos">
           <button class="btn primary" id="btn-agregar" type="button">+ Agregar aparato</button>
-          <button class="btn" id="btn-restaurar-aparatos" type="button" title="Vuelve a cargar los 12 aparatos del hogar de ejemplo">↺ Restaurar ejemplo</button>
-          <button class="btn quitar-todos" id="btn-quitar-todos" type="button">Quitar todos</button>
+          <details class="menu" id="menu-aparatos">
+            <summary class="btn">Más opciones</summary>
+            <div class="menu-lista">
+              <button class="btn ghost" id="btn-restaurar-aparatos" type="button">↺ Cargar los 12 aparatos del ejemplo</button>
+              <button class="btn ghost danger" id="btn-quitar-todos" type="button">Quitar todos los aparatos</button>
+            </div>
+          </details>
         </div>
       </div>
-      <div class="appliances">
-        <div class="panel">
-          <div class="list-head" aria-hidden="true">
-            <span>Aparato</span><span class="r">Potencia</span><span>Horario</span><span class="r">Horas/día</span><span class="r">kWh/día</span><span></span>
+      <div class="panel lista-panel">
+        <div class="list-head" aria-hidden="true">
+          <span>Aparato</span><span>Horario</span><span class="r">kWh/día</span><span class="r" id="cabecera-costo">Costo · 30 días</span><span></span>
+        </div>
+        <div id="lista-aparatos"></div>
+      </div>
+      <dialog aria-labelledby="form-titulo" id="editor">
+        <form class="form" id="form-aparato" novalidate>
+          <div class="editor-head">
+            <h3 id="form-titulo">Agregar un aparato</h3>
+            <button class="btn ghost" type="button" id="cerrar-editor" aria-label="Cerrar formulario">✕</button>
           </div>
-          <div id="lista-aparatos"></div>
-        </div>
-        <dialog aria-labelledby="form-titulo" id="editor">
-          <form class="form" id="form-aparato" novalidate>
-            <div class="editor-head">
-              <h3 id="form-titulo">Agregar un aparato</h3>
-              <button class="btn ghost" type="button" id="cerrar-editor" aria-label="Cerrar formulario">✕</button>
-            </div>
-            <label class="field">Elegir de la lista
-              <select id="f-catalogo"></select>
+          <label class="field">Elegir de la lista
+            <select id="f-catalogo"></select>
+          </label>
+          <label class="field">Nombre
+            <input type="text" id="f-nombre" maxlength="60" placeholder="Ej.: Aire de la habitación" autocomplete="off">
+          </label>
+          <div class="two">
+            <label class="field">Potencia (W)
+              <input type="number" id="f-watts" min="1" max="20000" step="1" inputmode="numeric">
             </label>
-            <label class="field">Nombre
-              <input type="text" id="f-nombre" maxlength="60" placeholder="Ej.: Aire de la habitación" autocomplete="off">
+            <label class="field">Cantidad
+              <input type="number" id="f-cantidad" min="1" max="50" step="1" value="1" inputmode="numeric">
             </label>
-            <div class="three">
-              <label class="field">Potencia (W)
-                <input type="number" id="f-watts" min="1" max="20000" step="1" inputmode="numeric">
-              </label>
-              <label class="field">Cantidad
-                <input type="number" id="f-cantidad" min="1" max="50" step="1" value="1" inputmode="numeric">
-              </label>
-            </div>
-            <input type="hidden" id="f-horario">
-            <fieldset class="horario">
-              <legend>Horario de uso</legend>
-              <label class="check"><input type="checkbox" id="f-todo-dia"> Todo el día</label>
-              <div id="intervalos"><div id="primer-intervalo"></div></div>
-              <div id="intervalos-extra"></div>
-              <button type="button" class="btn small" id="agregar-intervalo">+ Otro horario</button>
-            </fieldset>
-            <div class="preview" id="f-preview">Completa los datos para ver cuánto consumirá.</div>
-            <div class="error" id="f-error" role="alert"></div>
-            <div class="buttons">
-              <button class="btn primary" type="submit" id="f-guardar">Agregar aparato</button>
-              <button class="btn" type="button" id="f-cancelar" hidden>Cancelar</button>
-            </div>
-          </form>
-        </dialog>
-      </div>
+          </div>
+          <input type="hidden" id="f-horario">
+          <fieldset class="horario">
+            <legend>Horario de uso</legend>
+            <label class="check"><input type="checkbox" id="f-todo-dia"> Todo el día</label>
+            <div id="intervalos"><div id="primer-intervalo"></div></div>
+            <div id="intervalos-extra"></div>
+            <button type="button" class="btn small" id="agregar-intervalo">+ Otro horario</button>
+          </fieldset>
+          <div class="preview" id="f-preview">Completa los datos para ver cuánto consumirá.</div>
+          <div class="error" id="f-error" role="alert"></div>
+          <div class="buttons">
+            <button class="btn primary" type="submit" id="f-guardar">Agregar aparato</button>
+            <button class="btn" type="button" id="f-cancelar" hidden>Cancelar</button>
+          </div>
+        </form>
+      </dialog>
     </div>
   </section>
 
@@ -191,7 +236,7 @@
           <h2>Simulador de ahorro</h2>
           <p>Mueve las barras para usar cada aparato menos horas al día y mira cuánto baja la factura.</p>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div class="acciones-simulador">
           <button class="btn small" type="button" id="btn-aire" hidden>Probar: aire 2 horas menos</button>
           <button class="btn small ghost" type="button" id="btn-reiniciar-sim">Reiniciar</button>
         </div>
@@ -200,6 +245,7 @@
         <div class="panel sliders" id="sliders"></div>
         <div class="panel resultado"><p class="nota">Importes con la tarifa de referencia</p><div class="result" id="resultado-ahorro"></div></div>
       </div>
+      <div class="barra-ahorro" id="barra-ahorro" aria-hidden="true"></div>
     </div>
   </section>
 
@@ -236,7 +282,7 @@
             <div class="error" id="l-error" role="alert"></div>
             <div class="buttons"><button class="btn primary" type="submit">Guardar lectura</button></div>
           </form>
-          <div class="readings" id="lista-lecturas" style="margin-top:14px"></div>
+          <div class="readings" id="lista-lecturas"></div>
         </div>
       </div>
     </div>
@@ -254,14 +300,14 @@
       </div>
       <div class="panel">
         <div class="tariff">
-          <label class="field">0 a 200 kWh (RD$/kWh)<input type="number" id="t-0" min="0" step="0.01"></label>
-          <label class="field">201 a 300 kWh (RD$/kWh)<input type="number" id="t-1" min="0" step="0.01"></label>
-          <label class="field">301 a 700 kWh (RD$/kWh)<input type="number" id="t-2" min="0" step="0.01"></label>
-          <label class="field">Más de 700 kWh (RD$/kWh)<input type="number" id="t-3" min="0" step="0.01"></label>
+          <label class="field">0 a 200 kWh (RD$/kWh)<input type="number" id="t-0" min="0" step="0.01" inputmode="decimal"></label>
+          <label class="field">201 a 300 kWh (RD$/kWh)<input type="number" id="t-1" min="0" step="0.01" inputmode="decimal"></label>
+          <label class="field">301 a 700 kWh (RD$/kWh)<input type="number" id="t-2" min="0" step="0.01" inputmode="decimal"></label>
+          <label class="field">Más de 700 kWh (RD$/kWh)<input type="number" id="t-3" min="0" step="0.01" inputmode="decimal"></label>
         </div>
         <div class="tariff-extra">
-          <label class="field">Cargo fijo mensual (RD$)<input type="number" id="t-fijo" min="0" step="1"></label>
-          <label class="field">Días del período de facturación<input type="number" id="t-periodo" min="1" max="62" step="1"></label>
+          <label class="field">Cargo fijo mensual (RD$)<input type="number" id="t-fijo" min="0" step="1" inputmode="decimal"></label>
+          <label class="field">Días del período de facturación<input type="number" id="t-periodo" min="1" max="62" step="1" inputmode="numeric"></label>
         </div>
         <details class="reglas">
           <summary>Reglas cuando pasas de 700 kWh</summary>
@@ -293,7 +339,7 @@
         </details>
         <details class="panel" open>
           <summary>Regla del trapecio</summary>
-          <div class="formula">T<sub>n</sub> = <span style="font-size:.9em">h⁄2</span> [P(t<sub>0</sub>) + 2P(t<sub>1</sub>) + … + 2P(t<sub>n−1</sub>) + P(t<sub>n</sub>)]</div>
+          <div class="formula">T<sub>n</sub> = <span class="fraccion">h⁄2</span> [P(t<sub>0</sub>) + 2P(t<sub>1</sub>) + … + 2P(t<sub>n−1</sub>) + P(t<sub>n</sub>)]</div>
           <p>Divide el día en n partes de ancho h = 24/n y suma el área de los trapecios. Así se calcula la energía cuando solo se conocen mediciones cada cierto tiempo, como las de un sensor.</p>
           <p>Una malla más fina suele acercar la aproximación al área exacta. El error puede variar según dónde caen las muestras. Los aparatos que se usan pocos minutos, como el microondas, son los que más se escapan con n pequeño.</p>
         </details>
@@ -321,6 +367,11 @@
     </div>
   </div>
 </footer>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden>
+  <span id="toast-texto"></span>
+  <button class="btn small" id="toast-deshacer" type="button" hidden>Deshacer</button>
 </div>
 
 <div class="sr-only" aria-live="polite" id="anuncio"></div>

@@ -52,14 +52,26 @@
   ];
 
   // Lecturas de ejemplo del contador (kWh acumulados que marca el medidor).
-  const EJEMPLO_LECTURAS = [
-    { fecha: '2026-11-01', valor: 15230 },
-    { fecha: '2026-11-02', valor: 15241 },
-    { fecha: '2026-11-03', valor: 15253 },
-    { fecha: '2026-11-04', valor: 15263 },
-    { fecha: '2026-11-05', valor: 15275 },
-    { fecha: '2026-11-06', valor: 15286 }
-  ];
+  // Las fechas se calculan desde hoy (seis días seguidos que terminan ayer),
+  // así la proyección del ejemplo nunca habla de fechas que ya pasaron.
+  const VALORES_LECTURAS_EJEMPLO = [15230, 15241, 15253, 15263, 15275, 15286];
+
+  /** Seis lecturas diarias seguidas que terminan en `ultimaISO` ('AAAA-MM-DD'). */
+  function lecturasDeEjemplo(ultimaISO) {
+    const fin = Date.UTC(+ultimaISO.slice(0, 4), +ultimaISO.slice(5, 7) - 1, +ultimaISO.slice(8, 10));
+    const n = VALORES_LECTURAS_EJEMPLO.length;
+    return VALORES_LECTURAS_EJEMPLO.map(function (valor, i) {
+      return { fecha: new Date(fin - (n - 1 - i) * 86400000).toISOString().slice(0, 10), valor: valor };
+    });
+  }
+
+  function ayerISO() {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  const EJEMPLO_LECTURAS = lecturasDeEjemplo(ayerISO());
 
   // Tarifa residencial de referencia (RD$). 0–200 y más de 700 kWh: valores
   // citados por el Ministerio de Energía y Minas (oct. 2026). Bloques
@@ -106,7 +118,15 @@
     return 1;
   }
 
-  const DATOS = { CATALOGO: CATALOGO, EJEMPLO_APARATOS: EJEMPLO_APARATOS, EJEMPLO_LECTURAS: EJEMPLO_LECTURAS, TARIFA: TARIFA, cicloAutomatico: cicloAutomatico };
+  const DATOS = {
+    CATALOGO: CATALOGO,
+    EJEMPLO_APARATOS: EJEMPLO_APARATOS,
+    EJEMPLO_LECTURAS: EJEMPLO_LECTURAS,
+    VALORES_LECTURAS_EJEMPLO: VALORES_LECTURAS_EJEMPLO,
+    lecturasDeEjemplo: lecturasDeEjemplo,
+    TARIFA: TARIFA,
+    cicloAutomatico: cicloAutomatico
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = DATOS;
   else root.VC_DATOS = DATOS;
 })(typeof window !== 'undefined' ? window : this);

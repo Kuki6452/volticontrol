@@ -52,4 +52,10 @@ near(D.cicloAutomatico('Calentador de agua'), 0.5); near(D.cicloAutomatico('Plan
 near(D.cicloAutomatico('Freidora de aire'), 1); near(D.cicloAutomatico('Televisor'), 1); near(D.cicloAutomatico(''), 1);
 for (const a of D.CATALOGO) near(D.cicloAutomatico(a.nombre), a.ciclo);
 for (const a of D.EJEMPLO_APARATOS) near(D.cicloAutomatico(a.nombre), a.ciclo);
+// Lecturas de ejemplo con fechas relativas: 6 días seguidos que terminan en la fecha dada
+const le = D.lecturasDeEjemplo('2026-03-02');
+assert.deepStrictEqual(le.map(l => l.fecha), ['2026-02-25','2026-02-26','2026-02-27','2026-02-28','2026-03-01','2026-03-02']);
+assert.deepStrictEqual(le.map(l => l.valor), D.VALORES_LECTURAS_EJEMPLO);
+assert.strictEqual(D.EJEMPLO_LECTURAS.length, 6);
+near(VC.diasEntre(D.EJEMPLO_LECTURAS[0].fecha, D.EJEMPLO_LECTURAS[5].fecha), 5);
 console.log('OK');
