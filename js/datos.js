@@ -118,7 +118,38 @@
     return 1;
   }
 
+  // Cambios de aparato que ahorran energía (para los consejos). Los valores
+  // nuevos salen del catálogo de arriba: inverter 900 W al 55 %, LED 9 W, etc.
+  const ALTERNATIVAS = [
+    {
+      texto: 'Cambiar el aire por uno inverter',
+      aplica: function (ap) { const n = normalizar(ap.nombre); return /aire|acondicionado|split/.test(n) && !/inverter/.test(n) && ap.watts >= 600; },
+      cambio: function (ap) { return { nombre: ap.nombre.replace(/\s*inverter/i, '') + ' inverter', watts: Math.round(ap.watts * 0.75), ciclo: 0.55 }; }
+    },
+    {
+      texto: 'Cambiar los bombillos incandescentes por LED',
+      aplica: function (ap) { return /incandescente/.test(normalizar(ap.nombre)); },
+      cambio: function () { return { nombre: 'Bombillo LED', watts: 9, ciclo: 1 }; }
+    },
+    {
+      texto: 'Usar una laptop en vez de la computadora de escritorio',
+      aplica: function (ap) { return /computadora de escritorio|\bpc\b|desktop/.test(normalizar(ap.nombre)); },
+      cambio: function () { return { nombre: 'Laptop', watts: 65, ciclo: 1 }; }
+    },
+    {
+      texto: 'Cambiar la nevera por una de bajo consumo',
+      aplica: function (ap) { return /nevera|nevecon|refrigerador/.test(normalizar(ap.nombre)) && ap.watts >= 250; },
+      cambio: function (ap) { return { nombre: 'Nevera de bajo consumo', watts: 150, ciclo: ap.ciclo }; }
+    },
+    {
+      texto: 'Cambiar el televisor por uno LED',
+      aplica: function (ap) { const n = normalizar(ap.nombre); return /televisor|\btv\b/.test(n) && ap.watts > 120; },
+      cambio: function () { return { nombre: 'Televisor LED 43"', watts: 80, ciclo: 1 }; }
+    }
+  ];
+
   const DATOS = {
+    ALTERNATIVAS: ALTERNATIVAS,
     CATALOGO: CATALOGO,
     EJEMPLO_APARATOS: EJEMPLO_APARATOS,
     EJEMPLO_LECTURAS: EJEMPLO_LECTURAS,

@@ -97,9 +97,27 @@
       nIndice: 3,
       trapecios: false,
       reducciones: {},
+      escenarios: [],
+      facturas: [],
       ejemplo: true,
       lecturasEjemplo: true
     };
+  }
+
+  // Validación de lo guardado (o de un hogar compartido): nada se usa sin revisar.
+  function escenariosValidos(lista) {
+    if (!Array.isArray(lista)) return [];
+    return lista.slice(0, 6).filter(function (e) { return e && typeof e.nombre === 'string' && e.reducciones && typeof e.reducciones === 'object'; })
+      .map(function (e) {
+        const r = {};
+        Object.keys(e.reducciones).forEach(function (k) { const v = +e.reducciones[k]; if (v > 0 && v <= 24) r[k] = v; });
+        return { id: String(e.id || nuevoId()), nombre: e.nombre.slice(0, 80), reducciones: r };
+      });
+  }
+  function facturasValidas(lista) {
+    if (!Array.isArray(lista)) return [];
+    return lista.slice(0, 36).filter(function (f) { return f && /^\d{4}-\d{2}$/.test(f.mes) && +f.kwh > 0 && +f.monto > 0; })
+      .map(function (f) { return { mes: f.mes, kwh: +f.kwh, monto: +f.monto }; });
   }
 
   function esLecturaEjemplo(l) { return D.VALORES_LECTURAS_EJEMPLO.indexOf(l.valor) >= 0; }
@@ -125,6 +143,8 @@
         nIndice: s.nIndice >= 0 && s.nIndice < N_VALORES.length ? s.nIndice : 3,
         trapecios: s.trapecios !== false,
         reducciones: s.reducciones || {},
+        escenarios: escenariosValidos(s.escenarios),
+        facturas: facturasValidas(s.facturas),
         ejemplo: !!s.ejemplo,
         lecturasEjemplo: s.lecturasEjemplo !== undefined ? !!s.lecturasEjemplo : !!s.ejemplo
       };
@@ -491,12 +511,36 @@
     return Array.from(set).filter(function (t) { return t >= 0 && t <= 24; }).sort(function (a, b) { return a - b; });
   }
 
-  function renderCurva(c) {
-    const cont = $('#grafico-curva');
+  // Animación de entrada de una gráfica: un recorte que se abre de izquierda a
+  // derecha, como si la curva se fuera dibujando a lo largo del día.
+  function revelar(s, capa, m, iw, ih, id, duracion) {
+    if (sinMovimiento) return;
+    const defs = svg('defs', {}, s);
+    const clip = svg('clipPath', { id: 'revelar-' + id }, defs);
+    const r = svg('rect', { x: m.l - 2, y: 0, width: 0, height: m.t + ih + 6 }, clip);
+    capa.setAttribute('clip-path', 'url(#revelar-' + id + ')');
+    const inicio = performance.now();
+    const total = duracion || 900;
+    function paso(ahora) {
+      // el primer cuadro puede llegar con una hora apenas anterior a `inicio`
+      const k = Math.min(1, Math.max(0, (ahora - inicio) / total));
+      r.setAttribute('width', (iw + 6) * (1 - Math.pow(1 - k, 3)));
+      if (k < 1) requestAnimationFrame(paso);
+      else capa.removeAttribute('clip-path');
+    }
+    requestAnimationFrame(paso);
+  }
+
+  function renderCurva(c, animar) {
+    dibujarCurva($('#grafico-curva'), c, { n: N_VALORES[estado.nIndice], trapecios: estado.trapecios, interactivo: true, animar: animar });
+  }
+
+  /** Dibuja P(t) en `cont`. op = { n, trapecios, interactivo, animar, alto }. */
+  function dibujarCurva(cont, c, op) {
     if (!cont.clientWidth) return;
     const ancho = Math.max(280, cont.clientWidth || 700);
     const angosto = ancho < 520;
-    const alto = angosto ? 245 : 330;
+    const alto = op.alto || (angosto ? 245 : 330);
     const m = { l: 48, r: 12, t: 24, b: 40 };
     const iw = ancho - m.l - m.r, ih = alto - m.t - m.b;
     const ap = estado.aparatos;
@@ -546,13 +590,15 @@
       if (i > 0) d += 'V' + y(tr.p);
       d += 'H' + x(tr.b);
     });
-    svg('path', { d: d + 'V' + y(0) + 'H' + x(0) + 'Z', class: 'area' }, s);
+    const capa = svg('g', {}, s);
+    if (op.animar) revelar(s, capa, m, iw, ih, cont.id);
+    svg('path', { d: d + 'V' + y(0) + 'H' + x(0) + 'Z', class: 'area' }, capa);
 
     // trapecios
-    const n = N_VALORES[estado.nIndice];
-    if (estado.trapecios) {
+    const n = op.n;
+    if (op.trapecios) {
       const h = 24 / n;
-      const gt = svg('g', {}, s);
+      const gt = svg('g', {}, capa);
       if (n <= 48) {
         for (let i = 0; i < n; i++) {
           const a = i * h, b = (i + 1) * h;
@@ -567,7 +613,8 @@
         for (let i = 0; i <= n; i++) svg('circle', { cx: x(i * h), cy: y(P(i * h)), r: 4, class: 'trap-dot' }, gt);
       }
     }
-    svg('path', { d: d, class: 'curve' }, s);
+    svg('path', { d: d, class: 'curve' }, capa);
+    if (!op.interactivo) return;
 
     // capa de interacción
     const cruz = svg('line', { class: 'cross', y1: m.t, y2: m.t + ih, visibility: 'hidden' }, s);
@@ -634,23 +681,21 @@
   }
 
   // ---------- contador ----------
-  function renderMedidor(c) {
-    const cont = $('#grafico-medidor');
+  /** Dibuja las lecturas acumuladas y la proyección en `cont`. op = { interactivo, animar, alto }. */
+  function dibujarMedidor(cont, c, op) {
     if (!cont.clientWidth) return;
     const proy = c.proy;
     const ancho = Math.max(280, cont.clientWidth || 600);
     const angosto = ancho < 520;
-    const alto = angosto ? 230 : 280;
+    const alto = op.alto || (angosto ? 230 : 280);
     const m = { l: 52, r: angosto ? 58 : 70, t: 16, b: 40 };
     const iw = ancho - m.l - m.r, ih = alto - m.t - m.b;
     cont.innerHTML = '';
     const s = svg('svg', { viewBox: '0 0 ' + ancho + ' ' + alto, width: ancho, height: alto, role: 'img', 'aria-label': proy ? 'Consumo acumulado según el contador, con proyección de ' + fmt(proy.total, 0) + ' kWh al final del período.' : 'Sin suficientes lecturas.' }, cont);
 
-    const hechos = $('#hechos-medidor');
     if (!proy) {
       const t = svg('text', { x: ancho / 2, y: alto / 2, 'text-anchor': 'middle', class: 'axis-title' }, s);
       t.textContent = estado.lecturas.length ? 'Agrega una lectura de otro día para ver tu ritmo' : 'Agrega al menos dos lecturas de días distintos';
-      hechos.innerHTML = '';
       return;
     }
 
@@ -685,12 +730,22 @@
     });
 
     const pts = proy.puntos;
-    svg('polyline', { points: pts.map(function (p) { return x(p.dia) + ',' + y(p.acumulado); }).join(' '), class: 'real' }, s);
-    svg('line', { x1: x(proy.ultimo.dia), y1: y(proy.ultimo.acumulado), x2: x(proy.periodo), y2: y(proy.total), class: 'proj' }, s);
-    pts.forEach(function (p) { svg('circle', { cx: x(p.dia), cy: y(p.acumulado), r: 4.5, class: 'dot' }, s); });
-    svg('circle', { cx: x(proy.periodo), cy: y(proy.total), r: 5, class: 'dot-end' }, s);
+    const linea = svg('polyline', { points: pts.map(function (p) { return x(p.dia) + ',' + y(p.acumulado); }).join(' '), class: 'real' }, s);
+    const lineaProy = svg('line', { x1: x(proy.ultimo.dia), y1: y(proy.ultimo.acumulado), x2: x(proy.periodo), y2: y(proy.total), class: 'proj' }, s);
+    pts.forEach(function (p, i) {
+      const punto = svg('circle', { cx: x(p.dia), cy: y(p.acumulado), r: 4.5, class: 'dot' }, s);
+      if (op.animar) { punto.classList.add('aparecer'); punto.style.animationDelay = (i * 70) + 'ms'; }
+    });
+    const final = svg('circle', { cx: x(proy.periodo), cy: y(proy.total), r: 5, class: 'dot-end' }, s);
     const fin = svg('text', { x: x(proy.periodo) + 8, y: y(proy.total) + 4, class: 'end-label' }, s);
     fin.textContent = fmt(proy.total, 0);
+    // animación: primero se trazan las lecturas reales y después aparece la proyección
+    if (op.animar && !sinMovimiento && linea.getTotalLength) {
+      linea.style.setProperty('--largo', linea.getTotalLength());
+      linea.classList.add('trazar');
+      [lineaProy, final, fin].forEach(function (el) { el.classList.add('aparecer-tarde'); });
+    }
+    if (!op.interactivo) return;
 
     // interacción: punto más cercano
     const tip = document.createElement('div');
@@ -714,6 +769,17 @@
     zona.addEventListener('pointermove', mover);
     zona.addEventListener('pointerdown', mover);
     zona.addEventListener('pointerleave', function () { tip.hidden = true; });
+  }
+
+  function renderMedidor(c, animar) {
+    const cont = $('#grafico-medidor');
+    if (!cont.clientWidth) return;
+    dibujarMedidor(cont, c, { interactivo: true, animar: animar });
+    const hechos = $('#hechos-medidor');
+    const proy = c.proy;
+    if (!proy) { hechos.innerHTML = ''; return; }
+    const umbrales = estado.tarifa.bloques.slice(0, 3).map(function (b) { return b.hasta; });
+    const pts = proy.puntos;
 
     // datos clave
     const facProy = VC.factura(proy.total, estado.tarifa);
@@ -817,6 +883,10 @@
       '</div>' +
       '<div class="savings"><span class="k">Ahorro en ' + estado.periodo + ' días</span><span class="v">' + rd(ahorro, 0) + '</span><span class="sub">≈ ' + rd(ahorro * 365 / estado.periodo, 0) + ' al año · ' + fmt(c.periodoKwh - nuevoPeriodo, 0) + ' kWh menos</span></div>' +
       (ahorro === 0 ? '<p class="vacio-sim">Mueve alguna barra para ver el ahorro.</p>' : bloqueTxt);
+    animarNumero('ahorro', $('#resultado-ahorro .savings .v'), ahorro, function (v) { return rd(v, 0); });
+    renderEscenarios(c);
+    const meta = $('#meta-valor');
+    meta.placeholder = fmt(Math.max(0, Math.round(c.factura.total * 0.85 / 50) * 50), 0);
 
     // En el celular, el resultado queda fijo abajo mientras se mueven las barras.
     const barra = $('#barra-ahorro');
@@ -830,6 +900,84 @@
     if (h < 1) return fmt(h * 60, 0) + ' min';
     const ent = Math.floor(h), min = Math.round((h - ent) * 60);
     return ent + ' h' + (min ? ' ' + min + ' min' : '');
+  }
+
+  // ---------- consejos ----------
+  let consejosActuales = [];
+  function renderConsejos() {
+    consejosActuales = VC.consejosAhorro(estado.aparatos, estado.tarifa, estado.periodo, D.ALTERNATIVAS);
+    const cont = $('#consejos');
+    if (!estado.aparatos.length) { cont.innerHTML = '<p class="empty">Agrega aparatos para ver consejos.</p>'; return; }
+    const lista = consejosActuales.map(function (k, i) {
+      return '<div class="consejo">' +
+        '<div class="consejo-texto"><b>' + esc(k.texto) + '</b><small>' + esc(k.nombre) + ' → ' + esc(k.nuevo.nombre) + ' · ' + fmt(k.menosKwhDia, 2) + ' kWh menos al día</small></div>' +
+        '<div class="consejo-ahorro"><b>−' + rd(k.ahorroRD, 0) + '</b><small>cada ' + estado.periodo + ' días · ≈ ' + rd(k.ahorroRD * 365 / estado.periodo, 0) + ' al año</small></div>' +
+        '<button class="btn small" type="button" data-consejo="' + i + '">Aplicar cambio</button>' +
+        '</div>';
+    }).join('');
+    cont.innerHTML = (lista || '<p class="consejo-vacio">Tus aparatos ya son de los eficientes de la lista.</p>') +
+      '<p class="consejo-horas">También puedes ahorrar usándolos menos horas: <a href="#ahorro">prueba el simulador</a>.</p>';
+  }
+
+  // ---------- escenarios del simulador ----------
+  function nombreEscenario(reducciones) {
+    const partes = Object.keys(reducciones).filter(function (id) { return reducciones[id] > 0; }).map(function (id) {
+      const ap = estado.aparatos.find(function (a) { return a.id === id; });
+      return ap ? { nombre: ap.nombre.replace(/ \d[\d,.]*\s*BTU.*$/i, ''), h: reducciones[id], kwh: VC.potenciaMedia(ap) * reducciones[id] } : null;
+    }).filter(Boolean).sort(function (a, b) { return b.kwh - a.kwh; });
+    if (!partes.length) return 'Sin cambios';
+    const texto = partes.slice(0, 2).map(function (p) { return p.nombre + ' −' + textoHoras(p.h); }).join(', ');
+    return texto + (partes.length > 2 ? ' y ' + (partes.length - 2) + ' más' : '');
+  }
+  function ahorroDe(reducciones, c) {
+    const valido = {};
+    Object.keys(reducciones).forEach(function (id) {
+      const ap = estado.aparatos.find(function (a) { return a.id === id; });
+      if (ap) valido[id] = Math.min(reducciones[id], VC.horasDeUso(ap.rangos));
+    });
+    const nueva = VC.factura(VC.energiaConReduccion(estado.aparatos, valido) * estado.periodo, estado.tarifa).total;
+    return c.factura.total - nueva;
+  }
+  function renderEscenarios(c) {
+    const cont = $('#lista-escenarios');
+    if (!estado.escenarios.length) {
+      cont.innerHTML = '<p class="nota">Guarda combinaciones de cambios para compararlas.</p>';
+      return;
+    }
+    const ahorros = estado.escenarios.map(function (e) { return ahorroDe(e.reducciones, c); });
+    const mejor = Math.max.apply(null, ahorros);
+    cont.innerHTML = estado.escenarios.map(function (e, i) {
+      return '<div class="escenario">' +
+        '<div><b>' + esc(e.nombre) + '</b>' + (ahorros[i] === mejor && estado.escenarios.length > 1 && mejor > 0 ? ' <span class="pill good">Mayor ahorro</span>' : '') +
+        '<small>Ahorra ' + rd(ahorros[i], 0) + ' cada ' + estado.periodo + ' días</small></div>' +
+        '<div class="escenario-acciones"><button class="btn small" type="button" data-escenario="' + esc(e.id) + '" data-accion="aplicar">Aplicar</button>' +
+        '<button class="btn small ghost danger" type="button" data-escenario="' + esc(e.id) + '" data-accion="borrar" aria-label="Borrar ' + esc(e.nombre) + '">Borrar</button></div>' +
+        '</div>';
+    }).join('');
+  }
+
+  // ---------- facturas reales ----------
+  const MESES_LARGOS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  function nombreMes(mes) { return MESES_LARGOS[+mes.slice(5, 7) - 1] + ' ' + mes.slice(0, 4); }
+  function renderFacturas(c) {
+    const cont = $('#lista-facturas');
+    const lista = estado.facturas.slice().sort(function (a, b) { return a.mes < b.mes ? 1 : -1; });
+    if (!lista.length) { cont.innerHTML = ''; return; }
+    let filas = '<tr><th>Mes</th><th class="r">kWh</th><th class="r">Pagaste</th><th class="r">Con la tarifa de la app</th><th class="r">Diferencia</th><th></th></tr>';
+    lista.forEach(function (f) {
+      const cmp = VC.compararFactura(f.kwh, f.monto, estado.tarifa);
+      const tipo = Math.abs(cmp.porcentaje) < 5 ? 'good' : Math.abs(cmp.porcentaje) < 15 ? 'warn' : 'crit';
+      filas += '<tr><td>' + nombreMes(f.mes) + '</td><td class="r">' + fmt(f.kwh, 0) + '</td><td class="r">' + rd(f.monto, 0) + '</td><td class="r">' + rd(cmp.calculado, 0) + '</td>' +
+        '<td class="r"><span class="pill ' + tipo + '">' + (cmp.diferencia >= 0 ? '+' : '−') + fmt(Math.abs(cmp.porcentaje), 0) + ' %</span></td>' +
+        '<td class="r"><button class="btn small ghost danger" type="button" data-mes="' + f.mes + '" aria-label="Borrar factura de ' + nombreMes(f.mes) + '">Borrar</button></td></tr>';
+    });
+    const promedio = lista.reduce(function (s, f) { return s + f.kwh; }, 0) / lista.length;
+    const cubre = promedio > 0 ? c.periodoKwh / promedio * 100 : 0;
+    const peor = lista.map(function (f) { return Math.abs(VC.compararFactura(f.kwh, f.monto, estado.tarifa).porcentaje); }).reduce(function (a, b) { return Math.max(a, b); }, 0);
+    cont.innerHTML = '<div class="tabla-scroll"><table class="tabla-facturas">' + filas + '</table></div>' +
+      '<p class="facturas-resumen">En promedio tus facturas marcan <b>' + fmt(promedio, 0) + ' kWh</b>. Tus aparatos registrados estiman <b>' + fmt(c.periodoKwh, 0) + ' kWh</b>, es decir, el <b>' + fmt(cubre, 0) + ' %</b>' +
+      (cubre < 85 ? '. Puede que falten aparatos o que algunos se usen más horas.' : cubre > 115 ? '. Quizás algún horario es más largo de lo real.' : ': la estimación se parece a la realidad.') +
+      (peor >= 5 ? ' Si la diferencia en RD$ es grande, revisa los precios en <a href="#tarifa">Tarifa</a>.' : '') + '</p>';
   }
 
   // ---------- tarifa ----------
@@ -858,8 +1006,183 @@
     renderMedidor(c);
     renderLecturas();
     renderAhorro(c);
+    renderConsejos();
+    renderFacturas(c);
     renderTarifa();
     guardar();
+  }
+
+  // Barras horizontales que crecen desde cero (al abrir una sección o un desplegable).
+  function crecerBarras(selector) {
+    if (sinMovimiento) return;
+    const barras = Array.from(document.querySelectorAll(selector));
+    barras.forEach(function (b) { b.dataset.ancho = b.style.width; b.style.transition = 'none'; b.style.width = '0'; });
+    void document.body.offsetWidth;
+    requestAnimationFrame(function () {
+      barras.forEach(function (b, i) { b.style.transition = ''; b.style.transitionDelay = Math.min(i * 30, 300) + 'ms'; b.style.width = b.dataset.ancho; });
+    });
+  }
+
+  // ---------- modo exposición ----------
+  // Recorrido de 7 pasos para presentar el proyecto con los datos del hogar actual.
+  function iniciarExposicion() {
+    const dlg = $('#expo');
+    const contenido = $('#expo-contenido');
+    let paso = 0;
+    let c = null;
+    let reloj = null;
+    let reproduciendo = true;
+
+    function picoDelDia(aparatos) {
+      let mejor = { t: 0, p: 0 };
+      for (let t = 0; t < 24; t += 1 / 12) { const p = VC.potenciaEn(t, aparatos); if (p > mejor.p) mejor = { t: t, p: p }; }
+      return mejor;
+    }
+
+    const PASOS = [
+      function () {
+        return '<p class="expo-etiqueta">El problema</p><h2 id="expo-titulo">¿Por qué sube tanto la factura de la luz?</h2>' +
+          '<div class="expo-cifra">' + rd(c.factura.total, 0) + '</div>' +
+          '<p class="expo-sub">Factura estimada de este hogar: ' + fmt(c.periodoKwh, 0) + ' kWh en ' + estado.periodo + ' días con ' + estado.aparatos.length + ' aparatos.</p>' +
+          '<p class="expo-texto">VoltiControl usa el Cálculo Integral para responder dos preguntas: <b>¿cuánta energía consume la casa?</b> y <b>¿cuánto cuesta?</b></p>';
+      },
+      function () {
+        const pico = picoDelDia(estado.aparatos);
+        const top = c.porAparato[0];
+        return '<p class="expo-etiqueta">Paso 1 · La función</p><h2 id="expo-titulo">La potencia P(t) cambia durante el día</h2>' +
+          '<div class="chart expo-grafica" id="expo-grafica"></div>' +
+          '<p class="expo-texto">P(t) es la suma de lo que consume cada aparato encendido a la hora t. El pico es a las <b>' + VC.formatoHora(pico.t) + '</b> con <b>' + fmt(pico.p / 1000, 2) + ' kW</b>' +
+          (top ? '; el que más pesa es <b>' + esc(top.ap.nombre) + '</b>.' : '.') + '</p>';
+      },
+      function () {
+        return '<p class="expo-etiqueta">Paso 2 · La integral</p><h2 id="expo-titulo">La energía es el área bajo la curva</h2>' +
+          '<div class="chart expo-grafica" id="expo-grafica"></div>' +
+          '<div class="expo-formula">E = ∫<sub>0</sub><sup>24</sup> P(t) dt = <b>' + fmt(c.diaria, 2) + ' kWh</b></div>' +
+          '<p class="expo-texto">Cada aparato consume potencia constante mientras está encendido, así que el área exacta es una suma de rectángulos: potencia × horas.</p>';
+      },
+      function () {
+        return '<p class="expo-etiqueta">Paso 3 · Integración numérica</p><h2 id="expo-titulo">Regla del trapecio</h2>' +
+          '<div class="chart expo-grafica" id="expo-grafica"></div>' +
+          '<div class="expo-trap"><div><span>n</span><b id="expo-n">4</b></div><div><span>Tₙ</span><b id="expo-tn"></b></div><div><span>Error</span><b id="expo-err"></b></div>' +
+          '<button class="btn small" type="button" id="expo-pausa">Pausa</button></div>' +
+          '<p class="expo-texto">T<sub>n</sub> = h/2 [P(t<sub>0</sub>) + 2P(t<sub>1</sub>) + … + P(t<sub>n</sub>)], con h = 24/n. Al subir n, los trapecios siguen mejor la curva y el error baja.</p>';
+      },
+      function () {
+        const f = c.factura;
+        const filas = f.lineas.map(function (l) {
+          const nombre = l.hasta === null && l.desde === 0 ? 'Todo el consumo' : (l.desde === 0 ? '0' : l.desde + 1) + (l.hasta === null ? '+' : '–' + l.hasta) + ' kWh';
+          return '<tr><td>' + nombre + '</td><td class="r">' + fmt(l.kwh, 1) + ' × ' + fmt(l.precio, 2) + '</td><td class="r">' + rd(l.monto, 0) + '</td></tr>';
+        }).join('');
+        return '<p class="expo-etiqueta">Paso 4 · Función por partes</p><h2 id="expo-titulo">Del día al mes, y la tarifa por bloques</h2>' +
+          '<div class="expo-formula">' + fmt(c.diaria, 2) + ' kWh/día × ' + estado.periodo + ' días = <b>' + fmt(c.periodoKwh, 0) + ' kWh</b></div>' +
+          '<table class="expo-tabla">' + filas + '<tr><td>Cargo fijo' + (f.itbis > 0 ? ' + ITBIS' : '') + '</td><td></td><td class="r">' + rd(f.cargoFijo + f.itbis, 0) + '</td></tr>' +
+          '<tr class="total"><td>Total</td><td></td><td class="r">' + rd(f.total, 0) + '</td></tr></table>' +
+          '<p class="expo-texto">Cada bloque de kWh tiene su propio precio: mientras más se consume, más caro sale cada kWh adicional.</p>';
+      },
+      function () {
+        const p = c.proy;
+        return '<p class="expo-etiqueta">Paso 5 · La derivada</p><h2 id="expo-titulo">El contador: el ritmo es la pendiente</h2>' +
+          '<div class="chart expo-grafica" id="expo-medidor"></div>' +
+          (p ? '<p class="expo-texto">Las lecturas son la energía acumulada. Su pendiente (recta de mínimos cuadrados) es el ritmo: <b>' + fmt(p.ritmo, 2) + ' kWh por día</b>. Con ella se proyectan <b>' + fmt(p.total, 0) + ' kWh</b> al cerrar el período.</p>'
+            : '<p class="expo-texto">Con dos o más lecturas del contador se calcula el ritmo diario (la pendiente) y se proyecta el cierre del período.</p>');
+      },
+      function () {
+        const k = VC.consejosAhorro(estado.aparatos, estado.tarifa, estado.periodo, D.ALTERNATIVAS)[0];
+        const aire = estado.aparatos.find(function (a) { return /aire/i.test(a.nombre) && VC.horasDeUso(a.rangos) >= 2; });
+        let horas = '';
+        if (aire) {
+          const r = {}; r[aire.id] = 2;
+          const nueva = VC.factura(VC.energiaConReduccion(estado.aparatos, r) * estado.periodo, estado.tarifa).total;
+          horas = '<li><b>−' + rd(c.factura.total - nueva, 0) + '</b> usando el ' + esc(aire.nombre.replace(/ \d[\d,.]*\s*BTU.*$/i, '').toLowerCase()) + ' 2 horas menos al día</li>';
+        }
+        return '<p class="expo-etiqueta">Conclusión</p><h2 id="expo-titulo">¿Cuánto se puede ahorrar?</h2>' +
+          '<ul class="expo-lista">' + horas + (k ? '<li><b>−' + rd(k.ahorroRD, 0) + '</b> si se hace este cambio: ' + esc(k.texto.toLowerCase()) + '</li>' : '') +
+          '<li>Con el simulador se prueba cualquier combinación y se fija una meta de factura.</li></ul>' +
+          '<p class="expo-creditos">Proyecto innovador de Cálculo Integral, sección 4 · ITLA<br>Leonardo Pérez · Randy Benítez · Eddian Hernández · Diego Martinez</p>';
+      }
+    ];
+
+    function detenerReloj() { clearInterval(reloj); reloj = null; }
+
+    function animarTrapecios() {
+      let i = 0;
+      const grafica = $('#expo-grafica');
+      function mostrar() {
+        const n = N_VALORES[i];
+        dibujarCurva(grafica, c, { n: n, trapecios: true, interactivo: false, alto: alturaGrafica() });
+        const aprox = VC.energiaTrapecio(estado.aparatos, n);
+        const err = c.diaria > 0 ? (aprox - c.diaria) / c.diaria * 100 : 0;
+        $('#expo-n').textContent = n;
+        $('#expo-tn').textContent = fmt(aprox, 3) + ' kWh';
+        $('#expo-err').textContent = (err >= 0 ? '+' : '−') + fmt(Math.abs(err), 1) + ' %';
+      }
+      function avanzar() { i = (i + 1) % N_VALORES.length; mostrar(); }
+      mostrar();
+      const boton = $('#expo-pausa');
+      function arrancar() { detenerReloj(); reloj = setInterval(avanzar, 1300); boton.textContent = 'Pausa'; }
+      // Con "reducir movimiento" no hay avance automático: el botón pasa a la siguiente n.
+      if (sinMovimiento) { boton.textContent = 'Siguiente n'; boton.addEventListener('click', avanzar); return; }
+      boton.addEventListener('click', function () {
+        reproduciendo = !reproduciendo;
+        if (reproduciendo) arrancar(); else { detenerReloj(); boton.textContent = 'Seguir'; }
+      });
+      if (reproduciendo) arrancar(); else boton.textContent = 'Seguir';
+    }
+
+    function alturaGrafica() { return Math.max(220, Math.min(380, window.innerHeight * 0.42)); }
+
+    function mostrarPaso(nuevo) {
+      detenerReloj();
+      paso = Math.max(0, Math.min(PASOS.length - 1, nuevo));
+      contenido.innerHTML = '<div class="expo-paso">' + PASOS[paso]() + '</div>';
+      $('#expo-progreso').textContent = (paso + 1) + ' / ' + PASOS.length;
+      $('#expo-anterior').disabled = paso === 0;
+      $('#expo-siguiente').textContent = paso === PASOS.length - 1 ? 'Terminar' : 'Siguiente →';
+      $('#expo-puntos').querySelectorAll('button').forEach(function (b, i) { b.setAttribute('aria-selected', i === paso ? 'true' : 'false'); });
+      const g = $('#expo-grafica');
+      if (g && paso === 3) animarTrapecios();
+      else if (g) dibujarCurva(g, c, { n: 4, trapecios: false, interactivo: false, animar: paso === 2, alto: alturaGrafica() });
+      const med = $('#expo-medidor');
+      if (med) dibujarMedidor(med, c, { interactivo: false, animar: true, alto: alturaGrafica() });
+    }
+
+    $('#expo-puntos').innerHTML = PASOS.map(function (_, i) {
+      return '<button type="button" role="tab" aria-label="Paso ' + (i + 1) + '" data-paso="' + i + '"></button>';
+    }).join('');
+    $('#expo-puntos').addEventListener('click', function (e) {
+      const b = e.target.closest('button[data-paso]');
+      if (b) mostrarPaso(+b.dataset.paso);
+    });
+    $('#expo-anterior').addEventListener('click', function () { mostrarPaso(paso - 1); });
+    $('#expo-siguiente').addEventListener('click', function () {
+      if (paso === PASOS.length - 1) cerrar(); else mostrarPaso(paso + 1);
+    });
+    $('#expo-cerrar').addEventListener('click', cerrar);
+    dlg.addEventListener('keydown', function (e) {
+      if (e.target.closest && e.target.closest('input')) return;
+      if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); mostrarPaso(paso + 1); }
+      if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); mostrarPaso(paso - 1); }
+    });
+    dlg.addEventListener('close', function () {
+      detenerReloj();
+      if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(function () {});
+    });
+
+    function abrir() {
+      c = calcular();
+      reproduciendo = true;
+      if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+      if (document.documentElement.requestFullscreen && window.innerWidth > 780) {
+        document.documentElement.requestFullscreen().catch(function () { /* sin pantalla completa */ });
+      }
+      mostrarPaso(0);
+      $('#expo-siguiente').focus();
+    }
+    function cerrar() {
+      if (typeof dlg.close === 'function') dlg.close(); else { dlg.removeAttribute('open'); detenerReloj(); }
+    }
+    document.querySelectorAll('[data-expo]').forEach(function (b) { b.addEventListener('click', abrir); });
+    window.addEventListener('resize', function () { if (dlg.open && paso !== 3) mostrarPaso(paso); });
   }
 
   // ---------- eventos ----------
@@ -906,9 +1229,11 @@
         void activa.offsetWidth;
         activa.classList.add('entrando');
       }
+      // al entrar a una sección, sus gráficas se dibujan con animación
       if (ultimoCalculo) {
-        if (activa.id === 'resumen') renderCurva(ultimoCalculo);
-        if (activa.id === 'medidor') renderMedidor(ultimoCalculo);
+        if (activa.id === 'resumen') renderCurva(ultimoCalculo, true);
+        if (activa.id === 'medidor') renderMedidor(ultimoCalculo, true);
+        if (activa.id === 'aparatos') crecerBarras('#lista-aparatos .mini i');
       }
     }
     window.addEventListener('hashchange', function () { navegar(true); });
@@ -1310,20 +1635,160 @@
     });
 
 
+    // ---------- consejos ----------
+    $('#consejos').addEventListener('click', function (e) {
+      const btn = e.target.closest('button[data-consejo]');
+      if (!btn) return;
+      const k = consejosActuales[+btn.dataset.consejo];
+      if (!k) return;
+      conDeshacer('Cambiaste: ' + k.nombre + ' → ' + k.nuevo.nombre + '. Ahorras ' + rd(k.ahorroRD, 0) + '.', function () {
+        const ap = estado.aparatos.find(function (a) { return a.id === k.apId; });
+        if (!ap) return;
+        const i = estado.aparatos.indexOf(ap);
+        estado.aparatos[i] = aparatoDesde(Object.assign({}, ap, k.nuevo, { id: ap.id }));
+        marcarEditado();
+      });
+    });
+    // las barras de "Consumo por aparato" crecen al abrir el desplegable
+    $('#barras').closest('details').addEventListener('toggle', function (e) {
+      if (e.currentTarget.open) crecerBarras('#barras .bar-fill');
+    });
+
+    // ---------- meta de factura ----------
+    $('#form-meta').addEventListener('submit', function (e) {
+      e.preventDefault();
+      const c = ultimoCalculo;
+      const salida = $('#meta-resultado');
+      const meta = parseFloat($('#meta-valor').value);
+      if (!(meta > 0)) { salida.textContent = 'Escribe cuánto quieres pagar, por ejemplo ' + $('#meta-valor').placeholder + '.'; return; }
+      const plan = VC.planParaMeta(estado.aparatos, estado.tarifa, estado.periodo, meta);
+      if (plan.inicial <= meta) {
+        salida.innerHTML = 'Tu factura estimada (<b>' + rd(plan.inicial, 0) + '</b>) ya está por debajo de ' + rd(meta, 0) + '. ¡Vas bien!';
+        return;
+      }
+      conDeshacer('Se aplicaron los cambios sugeridos para la meta.', function () {
+        estado.reducciones = plan.reducciones;
+      });
+      const detalle = nombreEscenario(plan.reducciones);
+      salida.innerHTML = plan.alcanzable
+        ? 'Para pagar <b>' + rd(meta, 0) + '</b>: ' + esc(detalle) + '. La factura quedaría en <b>' + rd(plan.total, 0) + '</b> (ahorras ' + rd(plan.inicial - plan.total, 0) + '). Ya moví las barras por ti.'
+        : 'Solo usando menos los aparatos (hasta la mitad de sus horas) no se llega a ' + rd(meta, 0) + '. Lo más bajo es <b>' + rd(plan.total, 0) + '</b> con: ' + esc(detalle) + '. Mira también los <a href="#resumen">consejos para cambiar aparatos</a>.';
+      if (c) anunciar(salida.textContent);
+    });
+
+    // ---------- escenarios ----------
+    $('#btn-guardar-escenario').addEventListener('click', function () {
+      const r = {};
+      Object.keys(estado.reducciones).forEach(function (id) { if (estado.reducciones[id] > 0) r[id] = estado.reducciones[id]; });
+      if (!Object.keys(r).length) { mostrarAviso('Mueve alguna barra antes de guardar un escenario.'); return; }
+      if (estado.escenarios.length >= 6) { mostrarAviso('Puedes guardar hasta 6 escenarios. Borra uno para guardar otro.'); return; }
+      const nombre = nombreEscenario(r);
+      conDeshacer('Escenario guardado: ' + nombre + '.', function () {
+        estado.escenarios.push({ id: nuevoId(), nombre: nombre, reducciones: r });
+      });
+    });
+    $('#lista-escenarios').addEventListener('click', function (e) {
+      const btn = e.target.closest('button[data-escenario]');
+      if (!btn) return;
+      const esc_ = estado.escenarios.find(function (x) { return x.id === btn.dataset.escenario; });
+      if (!esc_) return;
+      if (btn.dataset.accion === 'aplicar') {
+        conDeshacer('Aplicaste: ' + esc_.nombre + '.', function () { estado.reducciones = clonar(esc_.reducciones); });
+      } else {
+        conDeshacer('Escenario borrado.', function () {
+          estado.escenarios = estado.escenarios.filter(function (x) { return x !== esc_; });
+        });
+      }
+    });
+
+    // ---------- facturas reales ----------
+    (function () {
+      const ahora = new Date();
+      ahora.setMonth(ahora.getMonth() - 1);
+      $('#fr-mes').value = ahora.getFullYear() + '-' + String(ahora.getMonth() + 1).padStart(2, '0');
+    })();
+    $('#form-factura').addEventListener('submit', function (e) {
+      e.preventDefault();
+      const mes = $('#fr-mes').value.trim();
+      const kwh = parseFloat($('#fr-kwh').value);
+      const monto = parseFloat($('#fr-monto').value);
+      const err = $('#fr-error');
+      if (!/^\d{4}-\d{2}$/.test(mes)) { err.textContent = 'Elige el mes de la factura (por ejemplo 2026-10).'; return; }
+      if (!(kwh > 0 && kwh < 100000)) { err.textContent = 'Escribe los kWh que dice la factura.'; return; }
+      if (!(monto > 0 && monto < 10000000)) { err.textContent = 'Escribe el total que pagaste en RD$.'; return; }
+      err.textContent = '';
+      conDeshacer('Factura de ' + nombreMes(mes) + ' guardada.', function () {
+        estado.facturas = estado.facturas.filter(function (f) { return f.mes !== mes; }).concat([{ mes: mes, kwh: kwh, monto: monto }]);
+      });
+      $('#fr-kwh').value = '';
+      $('#fr-monto').value = '';
+    });
+    $('#lista-facturas').addEventListener('click', function (e) {
+      const btn = e.target.closest('button[data-mes]');
+      if (!btn) return;
+      conDeshacer('Factura de ' + nombreMes(btn.dataset.mes) + ' borrada.', function () {
+        estado.facturas = estado.facturas.filter(function (f) { return f.mes !== btn.dataset.mes; });
+      });
+    });
+
+    // ---------- instalar como app y uso sin internet ----------
+    let eventoInstalar = null;
+    const btnInstalar = $('#btn-instalar');
+    const esIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const yaInstalada = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();
+      eventoInstalar = e;
+      btnInstalar.hidden = false;
+    });
+    if (esIOS && !yaInstalada) btnInstalar.hidden = false;
+    btnInstalar.addEventListener('click', function () {
+      if (eventoInstalar) {
+        eventoInstalar.prompt();
+        eventoInstalar.userChoice.then(function (r) { if (r.outcome === 'accepted') btnInstalar.hidden = true; });
+        eventoInstalar = null;
+      } else if (esIOS) {
+        mostrarAviso('En Safari: toca el botón Compartir y luego "Agregar a pantalla de inicio".');
+      }
+    });
+    window.addEventListener('appinstalled', function () {
+      btnInstalar.hidden = true;
+      mostrarAviso('VoltiControl quedó instalada. Ya funciona sin internet.');
+    });
+    // El "service worker" guarda la app para abrirla sin conexión. Solo existe en
+    // la página publicada (no en el archivo suelto de dist/, que no tiene manifiesto).
+    if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol) && document.querySelector('link[rel="manifest"]')) {
+      navigator.serviceWorker.register('sw.js').catch(function () { /* sin modo sin conexión */ });
+    }
+
+    // ---------- modo exposición ----------
+    iniciarExposicion();
+
     // redibujar gráficos al cambiar el tamaño
-    let anchoPrevio = 0, espera = null;
+    // Solo cuando una gráfica visible cambia de ancho (girar el celular, cambiar la
+    // ventana). Al aparecer una sección (ancho 0 → algo) ya la dibuja navegar(), con animación.
+    const anchos = { curva: $('#grafico-curva').clientWidth, medidor: $('#grafico-medidor').clientWidth };
+    let espera = null;
     const ro = new ResizeObserver(function () {
-      const w = $('#grafico-curva').clientWidth - $('#grafico-medidor').clientWidth;
-      if (Math.abs(w - anchoPrevio) < 4) return;
-      anchoPrevio = w;
+      const nuevos = { curva: $('#grafico-curva').clientWidth, medidor: $('#grafico-medidor').clientWidth };
+      const cambia = function (k) { return anchos[k] > 0 && nuevos[k] > 0 && Math.abs(nuevos[k] - anchos[k]) >= 4; };
+      const curva = cambia('curva'), medidor = cambia('medidor');
+      anchos.curva = nuevos.curva; anchos.medidor = nuevos.medidor;
+      if (!curva && !medidor) return;
       clearTimeout(espera);
-      espera = setTimeout(function () { renderCurva(ultimoCalculo); renderMedidor(ultimoCalculo); }, 60);
+      espera = setTimeout(function () { if (curva) renderCurva(ultimoCalculo); if (medidor) renderMedidor(ultimoCalculo); }, 60);
     });
     ro.observe($('#grafico-curva'));
     ro.observe($('#grafico-medidor'));
 
     limpiarFormulario();
     renderTodo();
+    // primera vista: la gráfica de la sección abierta se dibuja con animación
+    const abierta = document.querySelector('main > section:not([hidden])');
+    if (abierta && abierta.id === 'resumen') renderCurva(ultimoCalculo, true);
+    if (abierta && abierta.id === 'medidor') renderMedidor(ultimoCalculo, true);
+    anchos.curva = $('#grafico-curva').clientWidth;
+    anchos.medidor = $('#grafico-medidor').clientWidth;
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar);

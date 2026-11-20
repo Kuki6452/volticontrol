@@ -21,6 +21,12 @@ Para publicarla gratis, sube la carpeta a GitHub y activa **GitHub Pages** (Sett
 - **Lecturas del contador:** registro de lecturas diarias, ritmo real en kWh/día (pendiente por mínimos cuadrados), proyección al cierre del período y fecha en que se pasaría al siguiente bloque.
 - **Simulador de ahorro:** reduce las horas de uso de cada aparato y calcula el ahorro en RD$ por período y por año.
 - **Tarifa editable:** precios por bloque, cargo fijo, días del período y reglas para más de 700 kWh.
+- **Meta de factura:** escribes cuánto quieres pagar y la app recorta horas de uso (empezando por lo que más ahorra) hasta llegar.
+- **Escenarios:** guarda combinaciones del simulador y compáralas.
+- **Consejos con números:** cambios de aparato (aire inverter, bombillos LED…) con el ahorro en RD$ calculado con la tarifa por bloques.
+- **Facturas reales:** anota kWh y monto de tus facturas y compáralos con la tarifa y con lo que estiman tus aparatos.
+- **Compartir, imprimir y exponer:** enlace para compartir el hogar, informe en PDF y un modo exposición de 7 pasos para presentar el proyecto.
+- **Se instala como app** en el celular y funciona sin internet (cuando se abre desde GitHub Pages).
 
 Los datos se guardan en el navegador (`localStorage`).
 
@@ -34,6 +40,7 @@ js/datos.js         Catálogo de aparatos, hogar de ejemplo y tarifa de referenc
 js/app.js           Interfaz y gráficos (SVG, sin librerías)
 tests/calculos.test.js  Pruebas de los cálculos (node tests/calculos.test.js)
 build.py            Genera dist/volticontrol.html (todo en un archivo)
+manifest.webmanifest, sw.js, iconos/   Instalación como app y uso sin internet
 ```
 
 ## La matemática

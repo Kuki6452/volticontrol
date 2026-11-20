@@ -58,4 +58,31 @@ assert.deepStrictEqual(le.map(l => l.fecha), ['2026-02-25','2026-02-26','2026-02
 assert.deepStrictEqual(le.map(l => l.valor), D.VALORES_LECTURAS_EJEMPLO);
 assert.strictEqual(D.EJEMPLO_LECTURAS.length, 6);
 near(VC.diasEntre(D.EJEMPLO_LECTURAS[0].fecha, D.EJEMPLO_LECTURAS[5].fecha), 5);
+
+// Meta de factura: baja hasta la meta, empieza por el de más potencia y no toca los de 24 h
+const actual = VC.factura(exacta * 30, D.TARIFA).total;
+const plan = VC.planParaMeta(ap, D.TARIFA, 30, actual - 300);
+assert.ok(plan.alcanzable && plan.total <= actual - 300, 'meta alcanzable');
+near(plan.inicial, actual, 1e-6);
+const idAire = ap.find(a => /Aire/.test(a.nombre)).id;
+assert.ok(plan.reducciones[idAire] > 0, 'recorta primero el aire');
+for (const a of ap) if (VC.horasDeUso(a.rangos) === 24) assert.ok(!plan.reducciones[a.id], 'no toca ' + a.nombre);
+for (const a of ap) assert.ok((plan.reducciones[a.id] || 0) <= VC.horasDeUso(a.rangos) / 2 + 1e-9, 'máximo la mitad de horas');
+const imposible = VC.planParaMeta(ap, D.TARIFA, 30, 100);
+assert.ok(!imposible.alcanzable && imposible.total < actual, 'meta imposible: baja lo que puede');
+assert.ok(VC.planParaMeta(ap, D.TARIFA, 30, actual + 50).total === actual, 'meta ya cumplida: sin cambios');
+console.log('meta', (actual - 300).toFixed(0), '->', plan.total.toFixed(0), JSON.stringify(plan.reducciones));
+
+// Consejos: el aire del ejemplo tiene alternativa inverter y ahorra dinero
+const cons = VC.consejosAhorro(ap, D.TARIFA, 30, D.ALTERNATIVAS);
+assert.ok(cons.length >= 1 && /inverter/.test(cons[0].texto) && cons[0].ahorroRD > 0, 'consejo inverter');
+near(cons[0].menosKwhDia, (1200 * 0.7 - 900 * 0.55) * 7 / 1000, 1e-9);
+assert.strictEqual(VC.consejosAhorro([{ id: 'x', nombre: 'Aire inverter', watts: 900, cantidad: 1, ciclo: 0.55, rangos: [[22, 5]] }], D.TARIFA, 30, D.ALTERNATIVAS).length, 0);
+const foco = VC.consejosAhorro([{ id: 'f', nombre: 'Bombillo incandescente', watts: 60, cantidad: 4, ciclo: 1, rangos: [[18, 23]] }], D.TARIFA, 30, D.ALTERNATIVAS);
+assert.ok(foco.length === 1 && foco[0].nuevo.watts === 9);
+console.log('consejo', cons[0].texto, cons[0].ahorroRD.toFixed(0));
+
+// Factura real contra la tarifa
+const cmp = VC.compararFactura(300, 2400, D.TARIFA);
+near(cmp.calculado, 2288, 1e-6); near(cmp.diferencia, 112, 1e-6);
 console.log('OK');

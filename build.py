@@ -4,6 +4,9 @@ raiz = pathlib.Path(__file__).parent
 html = (raiz / 'index.html').read_text(encoding='utf-8')
 css = (raiz / 'css/styles.css').read_text(encoding='utf-8')
 html = html.replace('<link rel="stylesheet" href="css/styles.css">', '<style>\n' + css + '\n</style>')
+# El archivo suelto no se instala como app: sin manifiesto ni ícono externo
+# (así tampoco registra el modo sin internet, que solo funciona publicado).
+html = re.sub(r'<link rel="(manifest|apple-touch-icon)"[^>]*>\n?', '', html)
 for js in ['calculos', 'datos', 'app']:
     codigo = (raiz / f'js/{js}.js').read_text(encoding='utf-8')
     html = html.replace(f'<script src="js/{js}.js"></script>', '<script>\n' + codigo + '\n</script>')

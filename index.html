@@ -12,6 +12,9 @@
   // Aplica el tema elegido antes de pintar la página (evita un parpadeo de color).
   try { var t = localStorage.getItem('volticontrol.tema'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
 </script>
+<meta name="theme-color" content="#102e29">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="iconos/apple-touch-icon.png">
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -33,11 +36,17 @@
       <a href="#tarifa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 6h6m-6 4h6"/></svg><span>Tarifa</span></a>
       <a href="#matematica"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 4H7l6 8-6 8h10"/></svg><span>Matemática</span></a>
     </nav>
-    <button class="tema" id="btn-tema" type="button">
-      <svg class="icono-luna" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg>
-      <svg class="icono-sol" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
-      <span id="tema-texto">Modo oscuro</span>
-    </button>
+    <div class="rail-acciones">
+      <button class="rail-btn" id="btn-instalar" type="button" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M5 19h14"/></svg>
+        <span>Instalar app</span>
+      </button>
+      <button class="rail-btn tema" id="btn-tema" type="button">
+        <svg class="icono-luna" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg>
+        <svg class="icono-sol" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <span id="tema-texto">Modo oscuro</span>
+      </button>
+    </div>
   </div>
 </header>
 
@@ -86,6 +95,10 @@
           <button class="btn small" id="btn-imprimir" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6M6 18H4v-7h16v7h-2M8 14h8v7H8z"/></svg>
             Imprimir / PDF
+          </button>
+          <button class="btn small" type="button" data-expo>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18v12H3zM12 16v4m-4 0h8M10 7.5v5l4-2.5z"/></svg>
+            Modo exposición
           </button>
         </div>
       </div>
@@ -138,6 +151,12 @@
         <a class="btn primary" href="#aparatos">Ver aparatos <span aria-hidden="true">↗</span></a>
         <a class="btn" href="#ahorro">Simular ahorro <span aria-hidden="true">↗</span></a>
       </div>
+
+      <details class="panel desplegable" id="panel-consejos" open>
+        <summary>Consejos para ahorrar</summary>
+        <p class="nota">Cambios de aparato que bajan la factura, calculados con tus datos y la tarifa por bloques.</p>
+        <div class="consejos" id="consejos"></div>
+      </details>
 
       <details class="panel desplegable" open>
         <summary>Factura estimada</summary>
@@ -241,9 +260,28 @@
           <button class="btn small ghost" type="button" id="btn-reiniciar-sim">Reiniciar</button>
         </div>
       </div>
+      <form class="panel meta" id="form-meta" novalidate>
+        <label for="meta-valor">¿Cuánto quieres pagar de luz?</label>
+        <div class="meta-campos">
+          <span class="meta-moneda" aria-hidden="true">RD$</span>
+          <input type="number" id="meta-valor" min="0" step="50" inputmode="numeric" aria-describedby="meta-resultado">
+          <button class="btn primary small" type="submit">Sugerir cambios</button>
+        </div>
+        <p class="meta-resultado" id="meta-resultado" aria-live="polite">VoltiControl te dice qué aparatos usar menos para llegar a esa cifra.</p>
+      </form>
       <div class="save-layout">
         <div class="panel sliders" id="sliders"></div>
-        <div class="panel resultado"><p class="nota">Importes con la tarifa de referencia</p><div class="result" id="resultado-ahorro"></div></div>
+        <div class="panel resultado">
+          <p class="nota">Importes con la tarifa de referencia</p>
+          <div class="result" id="resultado-ahorro"></div>
+          <div class="escenarios">
+            <div class="escenarios-head">
+              <h3>Escenarios guardados</h3>
+              <button class="btn small" type="button" id="btn-guardar-escenario">Guardar este</button>
+            </div>
+            <div id="lista-escenarios"></div>
+          </div>
+        </div>
       </div>
       <div class="barra-ahorro" id="barra-ahorro" aria-hidden="true"></div>
     </div>
@@ -284,6 +322,19 @@
           </form>
           <div class="readings" id="lista-lecturas"></div>
         </div>
+      </div>
+
+      <div class="panel facturas">
+        <h3>Mis facturas reales</h3>
+        <p class="nota">Copia los kWh y el total de tus facturas de luz para comparar con lo que calcula VoltiControl.</p>
+        <form class="facturas-form" id="form-factura" novalidate>
+          <label class="field">Mes<input type="month" id="fr-mes" placeholder="2026-10"></label>
+          <label class="field">kWh consumidos<input type="number" id="fr-kwh" min="1" step="1" inputmode="numeric"></label>
+          <label class="field">Total pagado (RD$)<input type="number" id="fr-monto" min="1" step="0.01" inputmode="decimal"></label>
+          <button class="btn primary" type="submit">Agregar factura</button>
+        </form>
+        <div class="error" id="fr-error" role="alert"></div>
+        <div id="lista-facturas"></div>
       </div>
     </div>
   </section>
@@ -329,6 +380,7 @@
           <h2>La matemática detrás</h2>
           <p>VoltiControl aplica el Cálculo Integral a un problema de cada día: entender la factura de la luz.</p>
         </div>
+        <button class="btn primary" type="button" data-expo>▶ Modo exposición</button>
       </div>
       <div class="math">
         <details class="panel" open>
@@ -368,6 +420,20 @@
   </div>
 </footer>
 </div>
+
+<dialog class="expo" id="expo" aria-labelledby="expo-titulo">
+  <div class="expo-barra">
+    <span class="expo-marca">VoltiControl · Cálculo Integral</span>
+    <span class="expo-progreso" id="expo-progreso"></span>
+    <button class="btn small expo-cerrar" type="button" id="expo-cerrar">Salir <span class="tecla">Esc</span></button>
+  </div>
+  <div class="expo-contenido" id="expo-contenido"></div>
+  <div class="expo-nav">
+    <button class="btn" type="button" id="expo-anterior">← Anterior</button>
+    <div class="expo-puntos" id="expo-puntos" role="tablist" aria-label="Pasos"></div>
+    <button class="btn primary" type="button" id="expo-siguiente">Siguiente →</button>
+  </div>
+</dialog>
 
 <div class="toast" id="toast" role="status" aria-live="polite" hidden>
   <span id="toast-texto"></span>

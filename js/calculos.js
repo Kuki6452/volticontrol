@@ -226,7 +226,86 @@
     }, 0);
   }
 
+  // ---------- Meta de factura ----------
+
+  /** Paso con que se recortan las horas de un aparato (igual que las barras del simulador). */
+  function pasoHoras(horas) {
+    return horas <= 1 ? 1 / 12 : horas <= 4 ? 0.25 : 0.5;
+  }
+
+  /**
+   * Plan para llegar a una factura objetivo (RD$) recortando horas de uso.
+   * Empieza por el aparato que más energía puede ahorrar (potencia × la mitad
+   * de sus horas) y le quita horas hasta la mitad de su uso; si no alcanza,
+   * pasa al siguiente. Los aparatos que funcionan las
+   * 24 horas (nevera, router) no se tocan: apagarlos no es un consejo realista.
+   * Devuelve { reducciones: {id: horas}, inicial, total, alcanzable }.
+   */
+  function planParaMeta(aparatos, tarifa, periodo, meta) {
+    const reducciones = {};
+    const facturaActual = function () {
+      return factura(energiaConReduccion(aparatos, reducciones) * periodo, tarifa).total;
+    };
+    const inicial = facturaActual();
+    let total = inicial;
+    const candidatos = aparatos
+      .filter(function (ap) { return horasDeUso(ap.rangos) < 24 && potenciaMedia(ap) > 0; })
+      .map(function (ap) { const h = horasDeUso(ap.rangos); return { ap: ap, max: h / 2, paso: pasoHoras(h) }; })
+      .sort(function (a, b) { return potenciaMedia(b.ap) * b.max - potenciaMedia(a.ap) * a.max; });
+    let avanzo = true;
+    while (total > meta && avanzo) {
+      avanzo = false;
+      for (const c of candidatos) {
+        const actual = reducciones[c.ap.id] || 0;
+        if (actual + c.paso <= c.max + 1e-9) {
+          reducciones[c.ap.id] = Math.round((actual + c.paso) * 1e4) / 1e4;
+          avanzo = true;
+          break;
+        }
+      }
+      total = facturaActual();
+    }
+    return { reducciones: reducciones, inicial: inicial, total: total, alcanzable: total <= meta + 1e-9 };
+  }
+
+  // ---------- Consejos: cambiar un aparato por otro más eficiente ----------
+
+  /**
+   * Para cada aparato que tenga una alternativa más eficiente, calcula cuánto
+   * bajaría la factura del período. `alternativas` viene de datos.js:
+   * [{ aplica(ap) → bool, cambio(ap) → {nombre, watts, ciclo}, texto }].
+   * Devuelve la lista ordenada de mayor a menor ahorro en RD$.
+   */
+  function consejosAhorro(aparatos, tarifa, periodo, alternativas) {
+    const totalKwh = energiaDiariaTotal(aparatos) * periodo;
+    const facturaHoy = factura(totalKwh, tarifa).total;
+    const lista = [];
+    aparatos.forEach(function (ap) {
+      alternativas.forEach(function (alt, i) {
+        if (!alt.aplica(ap)) return;
+        const nuevo = Object.assign({}, ap, alt.cambio(ap));
+        const menosKwhDia = energiaDiaria(ap) - energiaDiaria(nuevo);
+        if (menosKwhDia <= 0) return;
+        const ahorroRD = facturaHoy - factura(totalKwh - menosKwhDia * periodo, tarifa).total;
+        lista.push({ apId: ap.id, alternativa: i, texto: alt.texto, nombre: ap.nombre, nuevo: alt.cambio(ap), menosKwhDia: menosKwhDia, ahorroRD: ahorroRD });
+      });
+    });
+    return lista.sort(function (a, b) { return b.ahorroRD - a.ahorroRD; });
+  }
+
+  // ---------- Facturas reales ----------
+
+  /** Compara una factura real con lo que da la tarifa de la app para esos mismos kWh. */
+  function compararFactura(kwh, montoReal, tarifa) {
+    const calculado = factura(kwh, tarifa).total;
+    return { calculado: calculado, diferencia: montoReal - calculado, porcentaje: calculado > 0 ? (montoReal - calculado) / calculado * 100 : 0 };
+  }
+
   const VC = {
+    pasoHoras: pasoHoras,
+    planParaMeta: planParaMeta,
+    consejosAhorro: consejosAhorro,
+    compararFactura: compararFactura,
     parseHora: parseHora,
     parseHorario: parseHorario,
     formatoHora: formatoHora,
